@@ -1,65 +1,273 @@
-import Image from "next/image";
+'use client'
 
-export default function Home() {
+import { useEffect, useState } from 'react'
+import { supabase } from '@/lib/supabase'
+
+type Event = {
+  id: string
+  name: string
+  event_date: string
+}
+
+type Attendee = {
+  id: string
+  event_id: string
+  name: string
+  checked_in: boolean
+  checked_in_at: string | null
+}
+
+export default function CheckInPage() {
+  const [event, setEvent] = useState<Event | null>(null)
+  const [attendees, setAttendees] = useState<Attendee[]>([])
+  const [search, setSearch] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [newName, setNewName] = useState('')
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [checking, setChecking] = useState<string | null>(null)
+
+  // イベントと参加者の初期取得
+  useEffect(() => {
+    fetchData()
+  }, [])
+
+  // Realtime同期
+  useEffect(() => {
+    if (!event) return
+
+    const channel = supabase
+      .channel('event_attendees_changes')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'event_attendees' },
+        (payload) => {
+          setAttendees(prev =>
+            prev.map(a =>
+              a.id === payload.new.id ? { ...a, ...payload.new } as Attendee : a
+            )
+          )
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'event_attendees' },
+        (payload) => {
+          setAttendees(prev => [...prev, payload.new as Attendee])
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [event])
+
+  const fetchData = async () => {
+    const { data: eventData } = await supabase
+      .from('events')
+      .select('*')
+      .order('event_date', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (eventData) {
+      setEvent(eventData)
+
+      const { data: attendeesData } = await supabase
+        .from('event_attendees')
+        .select('*')
+        .eq('event_id', eventData.id)
+        .order('name')
+
+      setAttendees(attendeesData || [])
+    }
+    setLoading(false)
+  }
+
+  // チェックイン切り替え
+  const handleCheckIn = async (attendee: Attendee) => {
+    setChecking(attendee.id)
+    const newStatus = !attendee.checked_in
+    await supabase
+      .from('event_attendees')
+      .update({
+        checked_in: newStatus,
+        checked_in_at: newStatus ? new Date().toISOString() : null,
+      })
+      .eq('id', attendee.id)
+    setChecking(null)
+  }
+
+  // 飛び込み参加者追加（チェックイン済み状態で登録）
+  const handleAddAttendee = async () => {
+    if (!newName.trim() || !event) return
+    await supabase.from('event_attendees').insert({
+      event_id: event.id,
+      name: newName.trim(),
+      checked_in: true,
+      checked_in_at: new Date().toISOString(),
+    })
+    setNewName('')
+    setShowAddForm(false)
+  }
+
+  // CSV出力（BOM付きでExcel文字化け防止）
+  const downloadCSV = () => {
+    const headers = ['名前', 'チェックイン', 'チェックイン時間']
+    const rows = attendees.map(a => [
+      a.name,
+      a.checked_in ? '済' : '未',
+      a.checked_in_at
+        ? new Date(a.checked_in_at).toLocaleString('ja-JP')
+        : '',
+    ])
+    const csv = [headers, ...rows].map(row => row.join(',')).join('\n')
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `checkin_${new Date().toLocaleDateString('ja-JP').replace(/\//g, '-')}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const filtered = attendees.filter(a =>
+    a.name.toLowerCase().includes(search.toLowerCase())
+  )
+  const checkedCount = attendees.filter(a => a.checked_in).length
+
+  // ローディング
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <p className="text-gray-400 text-lg">読み込み中...</p>
+      </div>
+    )
+  }
+
+  // イベントなし
+  if (!event) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <p className="text-gray-400 text-lg">イベントが見つかりません</p>
+      </div>
+    )
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <div className="max-w-lg mx-auto p-4 pb-8 min-h-screen bg-gray-50">
+
+      {/* ヘッダー */}
+      <div className="bg-white rounded-2xl shadow-sm p-5 mb-4">
+        <h1 className="text-xl font-bold text-gray-800">{event.name}</h1>
+        <p className="text-gray-400 text-sm mt-1">
+          {new Date(event.event_date).toLocaleDateString('ja-JP', {
+            year: 'numeric', month: 'long', day: 'numeric'
+          })}
+        </p>
+        <div className="mt-4 flex items-end gap-2">
+          <span className="text-5xl font-bold text-blue-500">{checkedCount}</span>
+          <span className="text-gray-400 text-lg mb-1">/ {attendees.length} 名来場</span>
+        </div>
+        {/* プログレスバー */}
+        <div className="mt-3 w-full bg-gray-100 rounded-full h-2">
+          <div
+            className="bg-blue-500 h-2 rounded-full transition-all duration-500"
+            style={{ width: attendees.length > 0 ? `${(checkedCount / attendees.length) * 100}%` : '0%' }}
+          />
+        </div>
+      </div>
+
+      {/* 検索 */}
+      <div className="mb-3">
+        <input
+          type="text"
+          placeholder="🔍 名前で検索..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="w-full p-4 rounded-2xl border border-gray-200 bg-white shadow-sm text-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+      </div>
+
+      {/* 参加者リスト */}
+      <div className="space-y-2 mb-4">
+        {filtered.map(attendee => (
+          <button
+            key={attendee.id}
+            onClick={() => handleCheckIn(attendee)}
+            disabled={checking === attendee.id}
+            className={`w-full flex items-center justify-between p-4 rounded-2xl shadow-sm transition-all active:scale-98
+              ${attendee.checked_in
+                ? 'bg-blue-500 text-white'
+                : 'bg-white text-gray-800 border border-gray-200'
+              }`}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            <div className="text-left">
+              <p className="text-lg font-medium">{attendee.name}</p>
+              {attendee.checked_in && attendee.checked_in_at && (
+                <p className="text-xs text-blue-100 mt-0.5">
+                  {new Date(attendee.checked_in_at).toLocaleTimeString('ja-JP', {
+                    hour: '2-digit', minute: '2-digit'
+                  })} チェックイン
+                </p>
+              )}
+            </div>
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0
+              ${attendee.checked_in ? 'bg-white text-blue-500' : 'bg-gray-100 text-gray-300'}`}>
+              {checking === attendee.id ? '…' : attendee.checked_in ? '✓' : '○'}
+            </div>
+          </button>
+        ))}
+
+        {filtered.length === 0 && (
+          <p className="text-center text-gray-300 py-12 text-lg">該当者なし</p>
+        )}
+      </div>
+
+      {/* 飛び込み追加 */}
+      {showAddForm ? (
+        <div className="bg-white rounded-2xl shadow-sm p-4 mb-3 border border-gray-200">
+          <p className="text-sm font-semibold text-gray-600 mb-3">飛び込み参加者を追加</p>
+          <input
+            type="text"
+            placeholder="名前を入力"
+            value={newName}
+            onChange={e => setNewName(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleAddAttendee()}
+            className="w-full p-3 border border-gray-200 rounded-xl mb-3 focus:outline-none focus:ring-2 focus:ring-blue-400 text-lg"
+            autoFocus
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={handleAddAttendee}
+              className="flex-1 bg-blue-500 text-white py-3 rounded-xl font-semibold"
+            >
+              追加してチェックイン
+            </button>
+            <button
+              onClick={() => { setShowAddForm(false); setNewName('') }}
+              className="flex-1 bg-gray-100 text-gray-500 py-3 rounded-xl font-semibold"
+            >
+              キャンセル
+            </button>
+          </div>
         </div>
-      </main>
+      ) : (
+        <button
+          onClick={() => setShowAddForm(true)}
+          className="w-full bg-white border-2 border-dashed border-gray-200 text-gray-400 py-4 rounded-2xl mb-3 text-lg hover:bg-gray-50 transition-colors"
+        >
+          ＋ 飛び込み参加者を追加
+        </button>
+      )}
+
+      {/* CSV出力 */}
+      <button
+        onClick={downloadCSV}
+        className="w-full bg-gray-800 text-white py-4 rounded-2xl font-semibold text-lg"
+      >
+        CSVダウンロード
+      </button>
     </div>
-  );
+  )
 }
