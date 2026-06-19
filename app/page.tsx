@@ -15,6 +15,7 @@ type Attendee = {
   name: string
   checked_in: boolean
   checked_in_at: string | null
+  type: 'adult' | 'child'
 }
 
 export default function CheckInPage() {
@@ -28,9 +29,7 @@ export default function CheckInPage() {
   const [importing, setImporting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    fetchData()
-  }, [])
+  useEffect(() => { fetchData() }, [])
 
   useEffect(() => {
     if (!event) return
@@ -74,11 +73,13 @@ export default function CheckInPage() {
     setChecking(null)
   }
 
-  const handleAddAttendee = async () => {
+  // 大人を追加
+  const handleAddAdult = async () => {
     if (!newName.trim() || !event) return
     await supabase.from('event_attendees').insert({
       event_id: event.id,
       name: newName.trim(),
+      type: 'adult',
       checked_in: true,
       checked_in_at: new Date().toISOString(),
     })
@@ -86,7 +87,21 @@ export default function CheckInPage() {
     setShowAddForm(false)
   }
 
-  // CSVインポート
+  // 子どもを追加（自動採番）
+  const handleAddChild = async () => {
+    if (!event) return
+    const childCount = attendees.filter(a => a.type === 'child').length
+    const childName = `子ども${childCount + 1}`
+    await supabase.from('event_attendees').insert({
+      event_id: event.id,
+      name: childName,
+      type: 'child',
+      checked_in: true,
+      checked_in_at: new Date().toISOString(),
+    })
+  }
+
+  // CSVインポート（大人として取り込む）
   const handleCSVImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !event) return
@@ -116,6 +131,7 @@ export default function CheckInPage() {
       .map(name => ({
         event_id: event.id,
         name,
+        type: 'adult',
         checked_in: false,
         checked_in_at: null,
       }))
@@ -138,9 +154,10 @@ export default function CheckInPage() {
   }
 
   const downloadCSV = () => {
-    const headers = ['名前', 'チェックイン', 'チェックイン時間']
+    const headers = ['名前', '種別', 'チェックイン', 'チェックイン時間']
     const rows = attendees.map(a => [
       a.name,
+      a.type === 'child' ? '子ども' : '大人',
       a.checked_in ? '済' : '未',
       a.checked_in_at ? new Date(a.checked_in_at).toLocaleString('ja-JP') : '',
     ])
@@ -154,8 +171,12 @@ export default function CheckInPage() {
     URL.revokeObjectURL(url)
   }
 
-  const filtered = attendees.filter(a => a.name.toLowerCase().includes(search.toLowerCase()))
-  const checkedCount = attendees.filter(a => a.checked_in).length
+  const adults = attendees.filter(a => a.type === 'adult')
+  const children = attendees.filter(a => a.type === 'child')
+  const filteredAdults = adults.filter(a => a.name.toLowerCase().includes(search.toLowerCase()))
+  const filteredChildren = children.filter(a => a.name.toLowerCase().includes(search.toLowerCase()))
+  const adultChecked = adults.filter(a => a.checked_in).length
+  const childChecked = children.filter(a => a.checked_in).length
 
   if (loading) {
     return (
@@ -182,15 +203,29 @@ export default function CheckInPage() {
         <p className="text-gray-400 text-sm mt-1">
           {new Date(event.event_date).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}
         </p>
-        <div className="mt-4 flex items-end gap-2">
-          <span className="text-5xl font-bold text-blue-500">{checkedCount}</span>
-          <span className="text-gray-400 text-lg mb-1">/ {attendees.length} 名来場</span>
-        </div>
-        <div className="mt-3 w-full bg-gray-100 rounded-full h-2">
-          <div
-            className="bg-blue-500 h-2 rounded-full transition-all duration-500"
-            style={{ width: attendees.length > 0 ? `${(checkedCount / attendees.length) * 100}%` : '0%' }}
-          />
+        <div className="mt-4 flex gap-6">
+          <div>
+            <p className="text-xs text-gray-400 mb-1">大人</p>
+            <div className="flex items-end gap-1">
+              <span className="text-4xl font-bold text-blue-500">{adultChecked}</span>
+              <span className="text-gray-400 mb-1">/ {adults.length} 名</span>
+            </div>
+            <div className="mt-2 w-full bg-gray-100 rounded-full h-1.5">
+              <div className="bg-blue-500 h-1.5 rounded-full transition-all duration-500"
+                style={{ width: adults.length > 0 ? `${(adultChecked / adults.length) * 100}%` : '0%' }} />
+            </div>
+          </div>
+          <div>
+            <p className="text-xs text-gray-400 mb-1">子ども</p>
+            <div className="flex items-end gap-1">
+              <span className="text-4xl font-bold text-green-500">{childChecked}</span>
+              <span className="text-gray-400 mb-1">/ {children.length} 名</span>
+            </div>
+            <div className="mt-2 w-full bg-gray-100 rounded-full h-1.5">
+              <div className="bg-green-500 h-1.5 rounded-full transition-all duration-500"
+                style={{ width: children.length > 0 ? `${(childChecked / children.length) * 100}%` : '0%' }} />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -205,33 +240,68 @@ export default function CheckInPage() {
         />
       </div>
 
-      {/* 参加者リスト */}
-      <div className="space-y-2 mb-4">
-        {filtered.map(attendee => (
-          <button
-            key={attendee.id}
-            onClick={() => handleCheckIn(attendee)}
-            disabled={checking === attendee.id}
-            className={`w-full flex items-center justify-between p-4 rounded-2xl shadow-sm transition-all active:scale-98
-              ${attendee.checked_in ? 'bg-blue-500 text-white' : 'bg-white text-gray-800 border border-gray-200'}`}
-          >
-            <div className="text-left">
-              <p className="text-lg font-medium">{attendee.name}</p>
-              {attendee.checked_in && attendee.checked_in_at && (
-                <p className="text-xs text-blue-100 mt-0.5">
-                  {new Date(attendee.checked_in_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} チェックイン
-                </p>
-              )}
-            </div>
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0
-              ${attendee.checked_in ? 'bg-white text-blue-500' : 'bg-gray-100 text-gray-300'}`}>
-              {checking === attendee.id ? '…' : attendee.checked_in ? '✓' : '○'}
-            </div>
-          </button>
-        ))}
-        {filtered.length === 0 && (
-          <p className="text-center text-gray-300 py-12 text-lg">該当者なし</p>
-        )}
+      {/* 大人セクション */}
+      <div className="mb-4">
+        <p className="text-sm font-semibold text-gray-500 mb-2 px-1">👤 大人 ({adultChecked}/{adults.length}名)</p>
+        <div className="space-y-2">
+          {filteredAdults.map(attendee => (
+            <button
+              key={attendee.id}
+              onClick={() => handleCheckIn(attendee)}
+              disabled={checking === attendee.id}
+              className={`w-full flex items-center justify-between p-4 rounded-2xl shadow-sm transition-all
+                ${attendee.checked_in ? 'bg-blue-500 text-white' : 'bg-white text-gray-800 border border-gray-200'}`}
+            >
+              <div className="text-left">
+                <p className="text-lg font-medium">{attendee.name}</p>
+                {attendee.checked_in && attendee.checked_in_at && (
+                  <p className="text-xs text-blue-100 mt-0.5">
+                    {new Date(attendee.checked_in_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} チェックイン
+                  </p>
+                )}
+              </div>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0
+                ${attendee.checked_in ? 'bg-white text-blue-500' : 'bg-gray-100 text-gray-300'}`}>
+                {checking === attendee.id ? '…' : attendee.checked_in ? '✓' : '○'}
+              </div>
+            </button>
+          ))}
+          {filteredAdults.length === 0 && (
+            <p className="text-center text-gray-300 py-6">該当者なし</p>
+          )}
+        </div>
+      </div>
+
+      {/* 子どもセクション */}
+      <div className="mb-4">
+        <p className="text-sm font-semibold text-gray-500 mb-2 px-1">🧒 子ども ({childChecked}/{children.length}名)</p>
+        <div className="space-y-2">
+          {filteredChildren.map(attendee => (
+            <button
+              key={attendee.id}
+              onClick={() => handleCheckIn(attendee)}
+              disabled={checking === attendee.id}
+              className={`w-full flex items-center justify-between p-4 rounded-2xl shadow-sm transition-all
+                ${attendee.checked_in ? 'bg-green-500 text-white' : 'bg-white text-gray-800 border border-gray-200'}`}
+            >
+              <div className="text-left">
+                <p className="text-lg font-medium">{attendee.name}</p>
+                {attendee.checked_in && attendee.checked_in_at && (
+                  <p className="text-xs text-green-100 mt-0.5">
+                    {new Date(attendee.checked_in_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} チェックイン
+                  </p>
+                )}
+              </div>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0
+                ${attendee.checked_in ? 'bg-white text-green-500' : 'bg-gray-100 text-gray-300'}`}>
+                {checking === attendee.id ? '…' : attendee.checked_in ? '✓' : '○'}
+              </div>
+            </button>
+          ))}
+          {filteredChildren.length === 0 && (
+            <p className="text-center text-gray-300 py-6">子どもの参加者なし</p>
+          )}
+        </div>
       </div>
 
       {/* 飛び込み追加 */}
@@ -240,21 +310,24 @@ export default function CheckInPage() {
           <p className="text-sm font-semibold text-gray-600 mb-3">飛び込み参加者を追加</p>
           <input
             type="text"
-            placeholder="名前を入力"
+            placeholder="大人の名前を入力"
             value={newName}
             onChange={e => setNewName(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleAddAttendee()}
+            onKeyDown={e => e.key === 'Enter' && handleAddAdult()}
             className="w-full p-3 border border-gray-200 rounded-xl mb-3 focus:outline-none focus:ring-2 focus:ring-blue-400 text-lg"
             autoFocus
           />
-          <div className="flex gap-2">
-            <button onClick={handleAddAttendee} className="flex-1 bg-blue-500 text-white py-3 rounded-xl font-semibold">
-              追加してチェックイン
+          <div className="flex gap-2 mb-2">
+            <button onClick={handleAddAdult} className="flex-1 bg-blue-500 text-white py-3 rounded-xl font-semibold">
+              大人を追加
             </button>
             <button onClick={() => { setShowAddForm(false); setNewName('') }} className="flex-1 bg-gray-100 text-gray-500 py-3 rounded-xl font-semibold">
               キャンセル
             </button>
           </div>
+          <button onClick={handleAddChild} className="w-full bg-green-500 text-white py-3 rounded-xl font-semibold">
+            🧒 子どもを追加（自動採番）
+          </button>
         </div>
       ) : (
         <button
@@ -266,13 +339,7 @@ export default function CheckInPage() {
       )}
 
       {/* CSVインポート */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".csv"
-        onChange={handleCSVImport}
-        className="hidden"
-      />
+      <input ref={fileInputRef} type="file" accept=".csv" onChange={handleCSVImport} className="hidden" />
       <button
         onClick={() => fileInputRef.current?.click()}
         disabled={importing}
