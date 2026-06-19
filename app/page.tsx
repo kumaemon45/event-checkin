@@ -27,6 +27,8 @@ export default function CheckInPage() {
   const [showAddForm, setShowAddForm] = useState(false)
   const [checking, setChecking] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
+  const [isAdultOpen, setIsAdultOpen] = useState(true)
+  const [isChildOpen, setIsChildOpen] = useState(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { fetchData() }, [])
@@ -73,7 +75,6 @@ export default function CheckInPage() {
     setChecking(null)
   }
 
-  // 大人を追加
   const handleAddAdult = async () => {
     if (!newName.trim() || !event) return
     await supabase.from('event_attendees').insert({
@@ -87,7 +88,6 @@ export default function CheckInPage() {
     setShowAddForm(false)
   }
 
-  // 子どもを追加（自動採番）
   const handleAddChild = async () => {
     if (!event) return
     const childCount = attendees.filter(a => a.type === 'child').length
@@ -101,7 +101,6 @@ export default function CheckInPage() {
     })
   }
 
-  // CSVインポート（大人として取り込む）
   const handleCSVImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !event) return
@@ -204,8 +203,8 @@ export default function CheckInPage() {
           {new Date(event.event_date).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}
         </p>
         <div className="mt-4 flex gap-6">
-          <div>
-            <p className="text-xs text-gray-400 mb-1">大人</p>
+          <div className="flex-1">
+            <p className="text-xs text-gray-400 mb-1">👤 大人</p>
             <div className="flex items-end gap-1">
               <span className="text-4xl font-bold text-blue-500">{adultChecked}</span>
               <span className="text-gray-400 mb-1">/ {adults.length} 名</span>
@@ -215,8 +214,8 @@ export default function CheckInPage() {
                 style={{ width: adults.length > 0 ? `${(adultChecked / adults.length) * 100}%` : '0%' }} />
             </div>
           </div>
-          <div>
-            <p className="text-xs text-gray-400 mb-1">子ども</p>
+          <div className="flex-1">
+            <p className="text-xs text-gray-400 mb-1">🧒 子ども</p>
             <div className="flex items-end gap-1">
               <span className="text-4xl font-bold text-green-500">{childChecked}</span>
               <span className="text-gray-400 mb-1">/ {children.length} 名</span>
@@ -241,67 +240,83 @@ export default function CheckInPage() {
       </div>
 
       {/* 大人セクション */}
-      <div className="mb-4">
-        <p className="text-sm font-semibold text-gray-500 mb-2 px-1">👤 大人 ({adultChecked}/{adults.length}名)</p>
-        <div className="space-y-2">
-          {filteredAdults.map(attendee => (
-            <button
-              key={attendee.id}
-              onClick={() => handleCheckIn(attendee)}
-              disabled={checking === attendee.id}
-              className={`w-full flex items-center justify-between p-4 rounded-2xl shadow-sm transition-all
-                ${attendee.checked_in ? 'bg-blue-500 text-white' : 'bg-white text-gray-800 border border-gray-200'}`}
-            >
-              <div className="text-left">
-                <p className="text-lg font-medium">{attendee.name}</p>
-                {attendee.checked_in && attendee.checked_in_at && (
-                  <p className="text-xs text-blue-100 mt-0.5">
-                    {new Date(attendee.checked_in_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} チェックイン
-                  </p>
-                )}
-              </div>
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0
-                ${attendee.checked_in ? 'bg-white text-blue-500' : 'bg-gray-100 text-gray-300'}`}>
-                {checking === attendee.id ? '…' : attendee.checked_in ? '✓' : '○'}
-              </div>
-            </button>
-          ))}
-          {filteredAdults.length === 0 && (
-            <p className="text-center text-gray-300 py-6">該当者なし</p>
-          )}
-        </div>
+      <div className="mb-3">
+        <button
+          onClick={() => setIsAdultOpen(!isAdultOpen)}
+          className="w-full flex items-center justify-between px-4 py-3 bg-white rounded-2xl shadow-sm mb-2"
+        >
+          <span className="font-semibold text-gray-700">👤 大人 ({adultChecked}/{adults.length}名)</span>
+          <span className="text-gray-400 text-lg">{isAdultOpen ? '▲' : '▼'}</span>
+        </button>
+        {isAdultOpen && (
+          <div className="space-y-2">
+            {filteredAdults.map(attendee => (
+              <button
+                key={attendee.id}
+                onClick={() => handleCheckIn(attendee)}
+                disabled={checking === attendee.id}
+                className={`w-full flex items-center justify-between p-4 rounded-2xl shadow-sm transition-all
+                  ${attendee.checked_in ? 'bg-blue-500 text-white' : 'bg-white text-gray-800 border border-gray-200'}`}
+              >
+                <div className="text-left">
+                  <p className="text-lg font-medium">{attendee.name}</p>
+                  {attendee.checked_in && attendee.checked_in_at && (
+                    <p className="text-xs text-blue-100 mt-0.5">
+                      {new Date(attendee.checked_in_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} チェックイン
+                    </p>
+                  )}
+                </div>
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0
+                  ${attendee.checked_in ? 'bg-white text-blue-500' : 'bg-gray-100 text-gray-300'}`}>
+                  {checking === attendee.id ? '…' : attendee.checked_in ? '✓' : '○'}
+                </div>
+              </button>
+            ))}
+            {filteredAdults.length === 0 && (
+              <p className="text-center text-gray-300 py-6">該当者なし</p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 子どもセクション */}
       <div className="mb-4">
-        <p className="text-sm font-semibold text-gray-500 mb-2 px-1">🧒 子ども ({childChecked}/{children.length}名)</p>
-        <div className="space-y-2">
-          {filteredChildren.map(attendee => (
-            <button
-              key={attendee.id}
-              onClick={() => handleCheckIn(attendee)}
-              disabled={checking === attendee.id}
-              className={`w-full flex items-center justify-between p-4 rounded-2xl shadow-sm transition-all
-                ${attendee.checked_in ? 'bg-green-500 text-white' : 'bg-white text-gray-800 border border-gray-200'}`}
-            >
-              <div className="text-left">
-                <p className="text-lg font-medium">{attendee.name}</p>
-                {attendee.checked_in && attendee.checked_in_at && (
-                  <p className="text-xs text-green-100 mt-0.5">
-                    {new Date(attendee.checked_in_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} チェックイン
-                  </p>
-                )}
-              </div>
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0
-                ${attendee.checked_in ? 'bg-white text-green-500' : 'bg-gray-100 text-gray-300'}`}>
-                {checking === attendee.id ? '…' : attendee.checked_in ? '✓' : '○'}
-              </div>
-            </button>
-          ))}
-          {filteredChildren.length === 0 && (
-            <p className="text-center text-gray-300 py-6">子どもの参加者なし</p>
-          )}
-        </div>
+        <button
+          onClick={() => setIsChildOpen(!isChildOpen)}
+          className="w-full flex items-center justify-between px-4 py-3 bg-white rounded-2xl shadow-sm mb-2"
+        >
+          <span className="font-semibold text-gray-700">🧒 子ども ({childChecked}/{children.length}名)</span>
+          <span className="text-gray-400 text-lg">{isChildOpen ? '▲' : '▼'}</span>
+        </button>
+        {isChildOpen && (
+          <div className="space-y-2">
+            {filteredChildren.map(attendee => (
+              <button
+                key={attendee.id}
+                onClick={() => handleCheckIn(attendee)}
+                disabled={checking === attendee.id}
+                className={`w-full flex items-center justify-between p-4 rounded-2xl shadow-sm transition-all
+                  ${attendee.checked_in ? 'bg-green-500 text-white' : 'bg-white text-gray-800 border border-gray-200'}`}
+              >
+                <div className="text-left">
+                  <p className="text-lg font-medium">{attendee.name}</p>
+                  {attendee.checked_in && attendee.checked_in_at && (
+                    <p className="text-xs text-green-100 mt-0.5">
+                      {new Date(attendee.checked_in_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} チェックイン
+                    </p>
+                  )}
+                </div>
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0
+                  ${attendee.checked_in ? 'bg-white text-green-500' : 'bg-gray-100 text-gray-300'}`}>
+                  {checking === attendee.id ? '…' : attendee.checked_in ? '✓' : '○'}
+                </div>
+              </button>
+            ))}
+            {filteredChildren.length === 0 && (
+              <p className="text-center text-gray-300 py-6">子どもの参加者なし</p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 飛び込み追加 */}
