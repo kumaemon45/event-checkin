@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 
 type Event = {
@@ -25,80 +25,55 @@ export default function CheckInPage() {
   const [newName, setNewName] = useState('')
   const [showAddForm, setShowAddForm] = useState(false)
   const [checking, setChecking] = useState<string | null>(null)
+  const [importing, setImporting] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // イベントと参加者の初期取得
   useEffect(() => {
     fetchData()
   }, [])
 
-  // Realtime同期
   useEffect(() => {
     if (!event) return
-
     const channel = supabase
       .channel('event_attendees_changes')
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'event_attendees' },
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'event_attendees' },
         (payload) => {
-          setAttendees(prev =>
-            prev.map(a =>
-              a.id === payload.new.id ? { ...a, ...payload.new } as Attendee : a
-            )
-          )
+          setAttendees(prev => prev.map(a => a.id === payload.new.id ? { ...a, ...payload.new } as Attendee : a))
         }
       )
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'event_attendees' },
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'event_attendees' },
         (payload) => {
           setAttendees(prev => [...prev, payload.new as Attendee])
         }
       )
       .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
+    return () => { supabase.removeChannel(channel) }
   }, [event])
 
   const fetchData = async () => {
     const { data: eventData } = await supabase
-      .from('events')
-      .select('*')
-      .order('event_date', { ascending: false })
-      .limit(1)
-      .single()
-
+      .from('events').select('*')
+      .order('event_date', { ascending: false }).limit(1).single()
     if (eventData) {
       setEvent(eventData)
-
       const { data: attendeesData } = await supabase
-        .from('event_attendees')
-        .select('*')
-        .eq('event_id', eventData.id)
-        .order('name')
-
+        .from('event_attendees').select('*')
+        .eq('event_id', eventData.id).order('name')
       setAttendees(attendeesData || [])
     }
     setLoading(false)
   }
 
-  // チェックイン切り替え
   const handleCheckIn = async (attendee: Attendee) => {
     setChecking(attendee.id)
     const newStatus = !attendee.checked_in
-    await supabase
-      .from('event_attendees')
-      .update({
-        checked_in: newStatus,
-        checked_in_at: newStatus ? new Date().toISOString() : null,
-      })
-      .eq('id', attendee.id)
+    await supabase.from('event_attendees').update({
+      checked_in: newStatus,
+      checked_in_at: newStatus ? new Date().toISOString() : null,
+    }).eq('id', attendee.id)
     setChecking(null)
   }
 
-  // 飛び込み参加者追加（チェックイン済み状態で登録）
   const handleAddAttendee = async () => {
     if (!newName.trim() || !event) return
     await supabase.from('event_attendees').insert({
@@ -111,15 +86,63 @@ export default function CheckInPage() {
     setShowAddForm(false)
   }
 
-  // CSV出力（BOM付きでExcel文字化け防止）
+  // CSVインポート
+  const handleCSVImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !event) return
+    setImporting(true)
+
+    const text = await file.text()
+    const lines = text.split('\n').filter(l => l.trim())
+    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''))
+    const nameIdx = headers.indexOf('名前')
+
+    if (nameIdx === -1) {
+      alert('「名前」列が見つかりません')
+      setImporting(false)
+      return
+    }
+
+    const newNames = lines.slice(1)
+      .map(line => {
+        const cols = line.split(',').map(c => c.trim().replace(/"/g, ''))
+        return cols[nameIdx]
+      })
+      .filter(name => name && name.length > 0)
+
+    const existingNames = new Set(attendees.map(a => a.name))
+    const toInsert = newNames
+      .filter(name => !existingNames.has(name))
+      .map(name => ({
+        event_id: event.id,
+        name,
+        checked_in: false,
+        checked_in_at: null,
+      }))
+
+    if (toInsert.length === 0) {
+      alert('追加する参加者がいません（全員既に登録済み）')
+      setImporting(false)
+      e.target.value = ''
+      return
+    }
+
+    const { error } = await supabase.from('event_attendees').insert(toInsert)
+    if (error) {
+      alert('取り込みに失敗しました')
+    } else {
+      alert(`${toInsert.length}名を取り込みました`)
+    }
+    setImporting(false)
+    e.target.value = ''
+  }
+
   const downloadCSV = () => {
     const headers = ['名前', 'チェックイン', 'チェックイン時間']
     const rows = attendees.map(a => [
       a.name,
       a.checked_in ? '済' : '未',
-      a.checked_in_at
-        ? new Date(a.checked_in_at).toLocaleString('ja-JP')
-        : '',
+      a.checked_in_at ? new Date(a.checked_in_at).toLocaleString('ja-JP') : '',
     ])
     const csv = [headers, ...rows].map(row => row.join(',')).join('\n')
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
@@ -131,12 +154,9 @@ export default function CheckInPage() {
     URL.revokeObjectURL(url)
   }
 
-  const filtered = attendees.filter(a =>
-    a.name.toLowerCase().includes(search.toLowerCase())
-  )
+  const filtered = attendees.filter(a => a.name.toLowerCase().includes(search.toLowerCase()))
   const checkedCount = attendees.filter(a => a.checked_in).length
 
-  // ローディング
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
@@ -145,7 +165,6 @@ export default function CheckInPage() {
     )
   }
 
-  // イベントなし
   if (!event) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
@@ -161,15 +180,12 @@ export default function CheckInPage() {
       <div className="bg-white rounded-2xl shadow-sm p-5 mb-4">
         <h1 className="text-xl font-bold text-gray-800">{event.name}</h1>
         <p className="text-gray-400 text-sm mt-1">
-          {new Date(event.event_date).toLocaleDateString('ja-JP', {
-            year: 'numeric', month: 'long', day: 'numeric'
-          })}
+          {new Date(event.event_date).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}
         </p>
         <div className="mt-4 flex items-end gap-2">
           <span className="text-5xl font-bold text-blue-500">{checkedCount}</span>
           <span className="text-gray-400 text-lg mb-1">/ {attendees.length} 名来場</span>
         </div>
-        {/* プログレスバー */}
         <div className="mt-3 w-full bg-gray-100 rounded-full h-2">
           <div
             className="bg-blue-500 h-2 rounded-full transition-all duration-500"
@@ -197,18 +213,13 @@ export default function CheckInPage() {
             onClick={() => handleCheckIn(attendee)}
             disabled={checking === attendee.id}
             className={`w-full flex items-center justify-between p-4 rounded-2xl shadow-sm transition-all active:scale-98
-              ${attendee.checked_in
-                ? 'bg-blue-500 text-white'
-                : 'bg-white text-gray-800 border border-gray-200'
-              }`}
+              ${attendee.checked_in ? 'bg-blue-500 text-white' : 'bg-white text-gray-800 border border-gray-200'}`}
           >
             <div className="text-left">
               <p className="text-lg font-medium">{attendee.name}</p>
               {attendee.checked_in && attendee.checked_in_at && (
                 <p className="text-xs text-blue-100 mt-0.5">
-                  {new Date(attendee.checked_in_at).toLocaleTimeString('ja-JP', {
-                    hour: '2-digit', minute: '2-digit'
-                  })} チェックイン
+                  {new Date(attendee.checked_in_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} チェックイン
                 </p>
               )}
             </div>
@@ -218,7 +229,6 @@ export default function CheckInPage() {
             </div>
           </button>
         ))}
-
         {filtered.length === 0 && (
           <p className="text-center text-gray-300 py-12 text-lg">該当者なし</p>
         )}
@@ -238,16 +248,10 @@ export default function CheckInPage() {
             autoFocus
           />
           <div className="flex gap-2">
-            <button
-              onClick={handleAddAttendee}
-              className="flex-1 bg-blue-500 text-white py-3 rounded-xl font-semibold"
-            >
+            <button onClick={handleAddAttendee} className="flex-1 bg-blue-500 text-white py-3 rounded-xl font-semibold">
               追加してチェックイン
             </button>
-            <button
-              onClick={() => { setShowAddForm(false); setNewName('') }}
-              className="flex-1 bg-gray-100 text-gray-500 py-3 rounded-xl font-semibold"
-            >
+            <button onClick={() => { setShowAddForm(false); setNewName('') }} className="flex-1 bg-gray-100 text-gray-500 py-3 rounded-xl font-semibold">
               キャンセル
             </button>
           </div>
@@ -261,7 +265,24 @@ export default function CheckInPage() {
         </button>
       )}
 
-      {/* CSV出力 */}
+      {/* CSVインポート */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".csv"
+        onChange={handleCSVImport}
+        className="hidden"
+      />
+      <button
+        onClick={() => fileInputRef.current?.click()}
+        disabled={importing}
+        className={`w-full py-4 rounded-2xl font-semibold text-lg mb-3 transition-colors
+          ${importing ? 'bg-gray-200 text-gray-400' : 'bg-green-500 text-white hover:bg-green-600'}`}
+      >
+        {importing ? '取り込み中...' : '📋 CSVで名簿を取り込む'}
+      </button>
+
+      {/* CSVダウンロード */}
       <button
         onClick={downloadCSV}
         className="w-full bg-gray-800 text-white py-4 rounded-2xl font-semibold text-lg"
