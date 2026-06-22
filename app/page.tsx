@@ -154,7 +154,7 @@ export default function CheckInPage() {
 
     const { error } = await supabase.from('event_attendees').insert(toInsert)
     if (error) {
-      alert('取り込みに失敗しました')
+      alert('エラー: ' + error.message)
     } else {
       alert(`${toInsert.length}名を取り込みました`)
     }
