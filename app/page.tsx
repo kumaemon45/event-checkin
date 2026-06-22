@@ -13,6 +13,7 @@ type Attendee = {
   id: string
   event_id: string
   name: string
+  furigana: string | null
   checked_in: boolean
   checked_in_at: string | null
   type: 'adult' | 'child'
@@ -24,6 +25,7 @@ export default function CheckInPage() {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [newName, setNewName] = useState('')
+  const [newFurigana, setNewFurigana] = useState('')
   const [showAddForm, setShowAddForm] = useState(false)
   const [checking, setChecking] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
@@ -59,7 +61,7 @@ export default function CheckInPage() {
       setEvent(eventData)
       const { data: attendeesData } = await supabase
         .from('event_attendees').select('*')
-        .eq('event_id', eventData.id).order('name')
+        .eq('event_id', eventData.id).order('furigana')
       setAttendees(attendeesData || [])
     }
     setLoading(false)
@@ -80,11 +82,13 @@ export default function CheckInPage() {
     await supabase.from('event_attendees').insert({
       event_id: event.id,
       name: newName.trim(),
+      furigana: newFurigana.trim() || null,
       type: 'adult',
       checked_in: true,
       checked_in_at: new Date().toISOString(),
     })
     setNewName('')
+    setNewFurigana('')
     setShowAddForm(false)
   }
 
@@ -95,6 +99,7 @@ export default function CheckInPage() {
     await supabase.from('event_attendees').insert({
       event_id: event.id,
       name: childName,
+      furigana: null,
       type: 'child',
       checked_in: true,
       checked_in_at: new Date().toISOString(),
@@ -110,6 +115,7 @@ export default function CheckInPage() {
     const lines = text.split('\n').filter(l => l.trim())
     const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''))
     const nameIdx = headers.indexOf('名前')
+    const furiganaIdx = headers.indexOf('フリガナ')
 
     if (nameIdx === -1) {
       alert('「名前」列が見つかりません')
@@ -117,19 +123,23 @@ export default function CheckInPage() {
       return
     }
 
-    const newNames = lines.slice(1)
+    const newEntries = lines.slice(1)
       .map(line => {
         const cols = line.split(',').map(c => c.trim().replace(/"/g, ''))
-        return cols[nameIdx]
+        return {
+          name: cols[nameIdx],
+          furigana: furiganaIdx !== -1 ? cols[furiganaIdx] || null : null,
+        }
       })
-      .filter(name => name && name.length > 0)
+      .filter(entry => entry.name && entry.name.length > 0)
 
     const existingNames = new Set(attendees.map(a => a.name))
-    const toInsert = newNames
-      .filter(name => !existingNames.has(name))
-      .map(name => ({
+    const toInsert = newEntries
+      .filter(entry => !existingNames.has(entry.name))
+      .map(entry => ({
         event_id: event.id,
-        name,
+        name: entry.name,
+        furigana: entry.furigana,
         type: 'adult',
         checked_in: false,
         checked_in_at: null,
@@ -153,9 +163,10 @@ export default function CheckInPage() {
   }
 
   const downloadCSV = () => {
-    const headers = ['名前', '種別', 'チェックイン', 'チェックイン時間']
+    const headers = ['名前', 'フリガナ', '種別', 'チェックイン', 'チェックイン時間']
     const rows = attendees.map(a => [
       a.name,
+      a.furigana || '',
       a.type === 'child' ? '子ども' : '大人',
       a.checked_in ? '済' : '未',
       a.checked_in_at ? new Date(a.checked_in_at).toLocaleString('ja-JP') : '',
@@ -170,10 +181,18 @@ export default function CheckInPage() {
     URL.revokeObjectURL(url)
   }
 
+  const matchesSearch = (a: Attendee) => {
+    if (!search) return true
+    return (
+      a.name.includes(search) ||
+      (a.furigana ? a.furigana.includes(search) : false)
+    )
+  }
+
   const adults = attendees.filter(a => a.type === 'adult')
   const children = attendees.filter(a => a.type === 'child')
-  const filteredAdults = adults.filter(a => a.name.toLowerCase().includes(search.toLowerCase()))
-  const filteredChildren = children.filter(a => a.name.toLowerCase().includes(search.toLowerCase()))
+  const filteredAdults = adults.filter(matchesSearch)
+  const filteredChildren = children.filter(matchesSearch)
   const adultChecked = adults.filter(a => a.checked_in).length
   const childChecked = children.filter(a => a.checked_in).length
 
@@ -232,7 +251,7 @@ export default function CheckInPage() {
       <div className="mb-3">
         <input
           type="text"
-          placeholder="🔍 名前で検索..."
+          placeholder="🔍 カタカナ・漢字で検索..."
           value={search}
           onChange={e => setSearch(e.target.value)}
           className="w-full p-4 rounded-2xl border border-gray-200 bg-white shadow-sm text-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
@@ -259,6 +278,11 @@ export default function CheckInPage() {
                   ${attendee.checked_in ? 'bg-blue-500 text-white' : 'bg-white text-gray-800 border border-gray-200'}`}
               >
                 <div className="text-left">
+                  {attendee.furigana && (
+                    <p className={`text-xs mb-0.5 ${attendee.checked_in ? 'text-blue-100' : 'text-gray-400'}`}>
+                      {attendee.furigana}
+                    </p>
+                  )}
                   <p className="text-lg font-medium">{attendee.name}</p>
                   {attendee.checked_in && attendee.checked_in_at && (
                     <p className="text-xs text-blue-100 mt-0.5">
@@ -325,6 +349,13 @@ export default function CheckInPage() {
           <p className="text-sm font-semibold text-gray-600 mb-3">飛び込み参加者を追加</p>
           <input
             type="text"
+            placeholder="フリガナ（任意）"
+            value={newFurigana}
+            onChange={e => setNewFurigana(e.target.value)}
+            className="w-full p-3 border border-gray-200 rounded-xl mb-2 focus:outline-none focus:ring-2 focus:ring-blue-400 text-lg"
+          />
+          <input
+            type="text"
             placeholder="大人の名前を入力"
             value={newName}
             onChange={e => setNewName(e.target.value)}
@@ -336,7 +367,7 @@ export default function CheckInPage() {
             <button onClick={handleAddAdult} className="flex-1 bg-blue-500 text-white py-3 rounded-xl font-semibold">
               大人を追加
             </button>
-            <button onClick={() => { setShowAddForm(false); setNewName('') }} className="flex-1 bg-gray-100 text-gray-500 py-3 rounded-xl font-semibold">
+            <button onClick={() => { setShowAddForm(false); setNewName(''); setNewFurigana('') }} className="flex-1 bg-gray-100 text-gray-500 py-3 rounded-xl font-semibold">
               キャンセル
             </button>
           </div>
