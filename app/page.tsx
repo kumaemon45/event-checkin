@@ -61,7 +61,7 @@ export default function CheckInPage() {
       setEvent(eventData)
       const { data: attendeesData } = await supabase
         .from('event_attendees').select('*')
-        .eq('event_id', eventData.id).order('furigana')
+        .eq('event_id', eventData.id).order('name')
       setAttendees(attendeesData || [])
     }
     setLoading(false)
