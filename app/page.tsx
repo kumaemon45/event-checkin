@@ -34,6 +34,7 @@ export default function CheckInPage() {
   const [pendingUncheck, setPendingUncheck] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastTapRef = useRef<{ id: string; time: number } | null>(null)
 
   useEffect(() => { fetchData() }, [])
 
@@ -75,12 +76,15 @@ export default function CheckInPage() {
     setLoading(false)
   }
 
-  // チェックイン切り替え（取り消しはダブルタップ必須）
+  // チェックイン切り替え（取り消しは400ms以内の本物のダブルタップのみ）
   const handleCheckIn = async (attendee: Attendee) => {
-    // チェックイン済み → 取り消そうとしている場合
     if (attendee.checked_in) {
-      if (pendingUncheck === attendee.id) {
-        // 2回目タップ：確定して取り消す
+      const now = Date.now()
+      const last = lastTapRef.current
+
+      if (last && last.id === attendee.id && now - last.time < 400) {
+        // 本物のダブルタップが確定：取り消し実行
+        lastTapRef.current = null
         if (pendingTimeoutRef.current) clearTimeout(pendingTimeoutRef.current)
         setPendingUncheck(null)
         setChecking(attendee.id)
@@ -90,17 +94,20 @@ export default function CheckInPage() {
         }).eq('id', attendee.id)
         setChecking(null)
       } else {
-        // 1回目タップ：確認待ち状態にする
+        // 1回目のタップ：記録するだけで確定はしない
+        lastTapRef.current = { id: attendee.id, time: now }
         setPendingUncheck(attendee.id)
         if (pendingTimeoutRef.current) clearTimeout(pendingTimeoutRef.current)
         pendingTimeoutRef.current = setTimeout(() => {
           setPendingUncheck(null)
-        }, 1500)
+          lastTapRef.current = null
+        }, 400)
       }
       return
     }
 
-    // 未チェックイン → チェックインする場合は1タップでOK
+    // 未チェックイン → チェックインは1タップでOK
+    lastTapRef.current = null
     setChecking(attendee.id)
     await supabase.from('event_attendees').update({
       checked_in: true,
@@ -273,7 +280,7 @@ export default function CheckInPage() {
           )}
           <p className="text-lg font-medium">{attendee.name}</p>
           {isPending ? (
-            <p className="text-xs text-white mt-0.5 font-semibold">もう一度タップで取消</p>
+            <p className="text-xs text-white mt-0.5 font-semibold">もう一度素早くタップで取消</p>
           ) : (
             attendee.checked_in && attendee.checked_in_at && (
               <p className="text-xs text-white/80 mt-0.5">
