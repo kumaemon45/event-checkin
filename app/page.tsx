@@ -31,7 +31,9 @@ export default function CheckInPage() {
   const [importing, setImporting] = useState(false)
   const [isAdultOpen, setIsAdultOpen] = useState(true)
   const [isChildOpen, setIsChildOpen] = useState(true)
+  const [pendingUncheck, setPendingUncheck] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => { fetchData() }, [])
 
@@ -53,6 +55,12 @@ export default function CheckInPage() {
     return () => { supabase.removeChannel(channel) }
   }, [event])
 
+  useEffect(() => {
+    return () => {
+      if (pendingTimeoutRef.current) clearTimeout(pendingTimeoutRef.current)
+    }
+  }, [])
+
   const fetchData = async () => {
     const { data: eventData } = await supabase
       .from('events').select('*')
@@ -67,12 +75,36 @@ export default function CheckInPage() {
     setLoading(false)
   }
 
+  // チェックイン切り替え（取り消しはダブルタップ必須）
   const handleCheckIn = async (attendee: Attendee) => {
+    // チェックイン済み → 取り消そうとしている場合
+    if (attendee.checked_in) {
+      if (pendingUncheck === attendee.id) {
+        // 2回目タップ：確定して取り消す
+        if (pendingTimeoutRef.current) clearTimeout(pendingTimeoutRef.current)
+        setPendingUncheck(null)
+        setChecking(attendee.id)
+        await supabase.from('event_attendees').update({
+          checked_in: false,
+          checked_in_at: null,
+        }).eq('id', attendee.id)
+        setChecking(null)
+      } else {
+        // 1回目タップ：確認待ち状態にする
+        setPendingUncheck(attendee.id)
+        if (pendingTimeoutRef.current) clearTimeout(pendingTimeoutRef.current)
+        pendingTimeoutRef.current = setTimeout(() => {
+          setPendingUncheck(null)
+        }, 1500)
+      }
+      return
+    }
+
+    // 未チェックイン → チェックインする場合は1タップでOK
     setChecking(attendee.id)
-    const newStatus = !attendee.checked_in
     await supabase.from('event_attendees').update({
-      checked_in: newStatus,
-      checked_in_at: newStatus ? new Date().toISOString() : null,
+      checked_in: true,
+      checked_in_at: new Date().toISOString(),
     }).eq('id', attendee.id)
     setChecking(null)
   }
@@ -212,6 +244,51 @@ export default function CheckInPage() {
     )
   }
 
+  // 参加者ボタンの共通レンダリング
+  const renderAttendeeButton = (attendee: Attendee, color: 'blue' | 'green') => {
+    const isPending = pendingUncheck === attendee.id
+    const bgClass = isPending
+      ? 'bg-orange-400 text-white'
+      : attendee.checked_in
+        ? (color === 'blue' ? 'bg-blue-500 text-white' : 'bg-green-500 text-white')
+        : 'bg-white text-gray-800 border border-gray-200'
+    const iconBg = isPending
+      ? 'bg-white text-orange-500'
+      : attendee.checked_in
+        ? 'bg-white ' + (color === 'blue' ? 'text-blue-500' : 'text-green-500')
+        : 'bg-gray-100 text-gray-300'
+
+    return (
+      <button
+        key={attendee.id}
+        onClick={() => handleCheckIn(attendee)}
+        disabled={checking === attendee.id}
+        className={`w-full flex items-center justify-between p-4 rounded-2xl shadow-sm transition-all ${bgClass}`}
+      >
+        <div className="text-left">
+          {attendee.furigana && (
+            <p className={`text-xs mb-0.5 ${attendee.checked_in || isPending ? 'text-white/80' : 'text-gray-400'}`}>
+              {attendee.furigana}
+            </p>
+          )}
+          <p className="text-lg font-medium">{attendee.name}</p>
+          {isPending ? (
+            <p className="text-xs text-white mt-0.5 font-semibold">もう一度タップで取消</p>
+          ) : (
+            attendee.checked_in && attendee.checked_in_at && (
+              <p className="text-xs text-white/80 mt-0.5">
+                {new Date(attendee.checked_in_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} チェックイン
+              </p>
+            )
+          )}
+        </div>
+        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0 ${iconBg}`}>
+          {checking === attendee.id ? '…' : isPending ? '!' : attendee.checked_in ? '✓' : '○'}
+        </div>
+      </button>
+    )
+  }
+
   return (
     <div className="max-w-lg mx-auto p-4 pb-8 min-h-screen bg-gray-50">
 
@@ -269,33 +346,7 @@ export default function CheckInPage() {
         </button>
         {isAdultOpen && (
           <div className="space-y-2">
-            {filteredAdults.map(attendee => (
-              <button
-                key={attendee.id}
-                onClick={() => handleCheckIn(attendee)}
-                disabled={checking === attendee.id}
-                className={`w-full flex items-center justify-between p-4 rounded-2xl shadow-sm transition-all
-                  ${attendee.checked_in ? 'bg-blue-500 text-white' : 'bg-white text-gray-800 border border-gray-200'}`}
-              >
-                <div className="text-left">
-                  {attendee.furigana && (
-                    <p className={`text-xs mb-0.5 ${attendee.checked_in ? 'text-blue-100' : 'text-gray-400'}`}>
-                      {attendee.furigana}
-                    </p>
-                  )}
-                  <p className="text-lg font-medium">{attendee.name}</p>
-                  {attendee.checked_in && attendee.checked_in_at && (
-                    <p className="text-xs text-blue-100 mt-0.5">
-                      {new Date(attendee.checked_in_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} チェックイン
-                    </p>
-                  )}
-                </div>
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0
-                  ${attendee.checked_in ? 'bg-white text-blue-500' : 'bg-gray-100 text-gray-300'}`}>
-                  {checking === attendee.id ? '…' : attendee.checked_in ? '✓' : '○'}
-                </div>
-              </button>
-            ))}
+            {filteredAdults.map(attendee => renderAttendeeButton(attendee, 'blue'))}
             {filteredAdults.length === 0 && (
               <p className="text-center text-gray-300 py-6">該当者なし</p>
             )}
@@ -314,28 +365,7 @@ export default function CheckInPage() {
         </button>
         {isChildOpen && (
           <div className="space-y-2">
-            {filteredChildren.map(attendee => (
-              <button
-                key={attendee.id}
-                onClick={() => handleCheckIn(attendee)}
-                disabled={checking === attendee.id}
-                className={`w-full flex items-center justify-between p-4 rounded-2xl shadow-sm transition-all
-                  ${attendee.checked_in ? 'bg-green-500 text-white' : 'bg-white text-gray-800 border border-gray-200'}`}
-              >
-                <div className="text-left">
-                  <p className="text-lg font-medium">{attendee.name}</p>
-                  {attendee.checked_in && attendee.checked_in_at && (
-                    <p className="text-xs text-green-100 mt-0.5">
-                      {new Date(attendee.checked_in_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} チェックイン
-                    </p>
-                  )}
-                </div>
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0
-                  ${attendee.checked_in ? 'bg-white text-green-500' : 'bg-gray-100 text-gray-300'}`}>
-                  {checking === attendee.id ? '…' : attendee.checked_in ? '✓' : '○'}
-                </div>
-              </button>
-            ))}
+            {filteredChildren.map(attendee => renderAttendeeButton(attendee, 'green'))}
             {filteredChildren.length === 0 && (
               <p className="text-center text-gray-300 py-6">子どもの参加者なし</p>
             )}
