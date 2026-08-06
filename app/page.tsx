@@ -34,7 +34,6 @@ export default function CheckInPage() {
   const [pendingUncheck, setPendingUncheck] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const lastTapRef = useRef<{ id: string; time: number } | null>(null)
 
   useEffect(() => { fetchData() }, [])
 
@@ -76,42 +75,36 @@ export default function CheckInPage() {
     setLoading(false)
   }
 
-  // チェックイン切り替え（取り消しは400ms以内の本物のダブルタップのみ）
-  const handleCheckIn = async (attendee: Attendee) => {
+  // 1回タップ：チェックインのみ実行。チェックイン済みの場合は「取消ヒント」を出すだけで書き込みはしない
+  const handleTap = async (attendee: Attendee) => {
     if (attendee.checked_in) {
-      const now = Date.now()
-      const last = lastTapRef.current
-
-      if (last && last.id === attendee.id && now - last.time < 400) {
-        // 本物のダブルタップが確定：取り消し実行
-        lastTapRef.current = null
-        if (pendingTimeoutRef.current) clearTimeout(pendingTimeoutRef.current)
+      // 取り消しはしない。ヒント表示だけ
+      setPendingUncheck(attendee.id)
+      if (pendingTimeoutRef.current) clearTimeout(pendingTimeoutRef.current)
+      pendingTimeoutRef.current = setTimeout(() => {
         setPendingUncheck(null)
-        setChecking(attendee.id)
-        await supabase.from('event_attendees').update({
-          checked_in: false,
-          checked_in_at: null,
-        }).eq('id', attendee.id)
-        setChecking(null)
-      } else {
-        // 1回目のタップ：記録するだけで確定はしない
-        lastTapRef.current = { id: attendee.id, time: now }
-        setPendingUncheck(attendee.id)
-        if (pendingTimeoutRef.current) clearTimeout(pendingTimeoutRef.current)
-        pendingTimeoutRef.current = setTimeout(() => {
-          setPendingUncheck(null)
-          lastTapRef.current = null
-        }, 400)
-      }
+      }, 1000)
       return
     }
 
-    // 未チェックイン → チェックインは1タップでOK
-    lastTapRef.current = null
+    // 未チェックイン → チェックイン実行
     setChecking(attendee.id)
     await supabase.from('event_attendees').update({
       checked_in: true,
       checked_in_at: new Date().toISOString(),
+    }).eq('id', attendee.id)
+    setChecking(null)
+  }
+
+  // 本物のダブルタップ（ブラウザが検知した場合のみ）：取り消し実行
+  const handleDoubleTap = async (attendee: Attendee) => {
+    if (!attendee.checked_in) return
+    if (pendingTimeoutRef.current) clearTimeout(pendingTimeoutRef.current)
+    setPendingUncheck(null)
+    setChecking(attendee.id)
+    await supabase.from('event_attendees').update({
+      checked_in: false,
+      checked_in_at: null,
     }).eq('id', attendee.id)
     setChecking(null)
   }
@@ -268,9 +261,10 @@ export default function CheckInPage() {
     return (
       <button
         key={attendee.id}
-        onClick={() => handleCheckIn(attendee)}
+        onClick={() => handleTap(attendee)}
+        onDoubleClick={() => handleDoubleTap(attendee)}
         disabled={checking === attendee.id}
-        className={`w-full flex items-center justify-between p-4 rounded-2xl shadow-sm transition-all ${bgClass}`}
+        className={`touch-manipulation select-none w-full flex items-center justify-between p-4 rounded-2xl shadow-sm transition-all ${bgClass}`}
       >
         <div className="text-left">
           {attendee.furigana && (
@@ -280,7 +274,7 @@ export default function CheckInPage() {
           )}
           <p className="text-lg font-medium">{attendee.name}</p>
           {isPending ? (
-            <p className="text-xs text-white mt-0.5 font-semibold">もう一度素早くタップで取消</p>
+            <p className="text-xs text-white mt-0.5 font-semibold">素早く2回タップで取消</p>
           ) : (
             attendee.checked_in && attendee.checked_in_at && (
               <p className="text-xs text-white/80 mt-0.5">
