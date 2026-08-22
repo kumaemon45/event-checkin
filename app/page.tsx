@@ -17,6 +17,7 @@ type Attendee = {
   checked_in: boolean
   checked_in_at: string | null
   type: 'adult' | 'child'
+  is_reception: boolean
 }
 
 export default function CheckInPage() {
@@ -75,10 +76,8 @@ export default function CheckInPage() {
     setLoading(false)
   }
 
-  // 1回タップ：チェックインのみ実行。チェックイン済みの場合は「取消ヒント」を出すだけで書き込みはしない
   const handleTap = async (attendee: Attendee) => {
     if (attendee.checked_in) {
-      // 取り消しはしない。ヒント表示だけ
       setPendingUncheck(attendee.id)
       if (pendingTimeoutRef.current) clearTimeout(pendingTimeoutRef.current)
       pendingTimeoutRef.current = setTimeout(() => {
@@ -87,7 +86,6 @@ export default function CheckInPage() {
       return
     }
 
-    // 未チェックイン → チェックイン実行
     setChecking(attendee.id)
     await supabase.from('event_attendees').update({
       checked_in: true,
@@ -96,7 +94,6 @@ export default function CheckInPage() {
     setChecking(null)
   }
 
-  // 本物のダブルタップ（ブラウザが検知した場合のみ）：取り消し実行
   const handleDoubleTap = async (attendee: Attendee) => {
     if (!attendee.checked_in) return
     if (pendingTimeoutRef.current) clearTimeout(pendingTimeoutRef.current)
@@ -116,6 +113,7 @@ export default function CheckInPage() {
       name: newName.trim(),
       furigana: newFurigana.trim() || null,
       type: 'adult',
+      is_reception: false,
       checked_in: true,
       checked_in_at: new Date().toISOString(),
     })
@@ -133,6 +131,7 @@ export default function CheckInPage() {
       name: childName,
       furigana: null,
       type: 'child',
+      is_reception: false,
       checked_in: true,
       checked_in_at: new Date().toISOString(),
     })
@@ -148,6 +147,7 @@ export default function CheckInPage() {
     const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''))
     const nameIdx = headers.indexOf('名前')
     const furiganaIdx = headers.indexOf('フリガナ')
+    const productIdx = headers.indexOf('商品名')
 
     if (nameIdx === -1) {
       alert('「名前」列が見つかりません')
@@ -161,6 +161,7 @@ export default function CheckInPage() {
         return {
           name: cols[nameIdx],
           furigana: furiganaIdx !== -1 ? cols[furiganaIdx] || null : null,
+          is_reception: productIdx !== -1 ? cols[productIdx]?.includes('懇親会') || false : false,
         }
       })
       .filter(entry => entry.name && entry.name.length > 0)
@@ -173,6 +174,7 @@ export default function CheckInPage() {
         name: entry.name,
         furigana: entry.furigana,
         type: 'adult',
+        is_reception: entry.is_reception,
         checked_in: false,
         checked_in_at: null,
       }))
@@ -188,18 +190,20 @@ export default function CheckInPage() {
     if (error) {
       alert('エラー: ' + error.message)
     } else {
-      alert(`${toInsert.length}名を取り込みました`)
+      const receptionCount = toInsert.filter(a => a.is_reception).length
+      alert(`${toInsert.length}名を取り込みました（懇親会あり: ${receptionCount}名）`)
     }
     setImporting(false)
     e.target.value = ''
   }
 
   const downloadCSV = () => {
-    const headers = ['名前', 'フリガナ', '種別', 'チェックイン', 'チェックイン時間']
+    const headers = ['名前', 'フリガナ', '種別', '懇親会', 'チェックイン', 'チェックイン時間']
     const rows = attendees.map(a => [
       a.name,
       a.furigana || '',
       a.type === 'child' ? '子ども' : '大人',
+      a.is_reception ? 'あり' : 'なし',
       a.checked_in ? '済' : '未',
       a.checked_in_at ? new Date(a.checked_in_at).toLocaleString('ja-JP') : '',
     ])
@@ -258,6 +262,12 @@ export default function CheckInPage() {
         ? 'bg-white ' + (color === 'blue' ? 'text-blue-500' : 'text-green-500')
         : 'bg-gray-100 text-gray-300'
 
+    // 懇親会バッジ：チェックイン状態に関わらず常に見えるよう、白背景ベースの淡い色で統一
+    const badgeClass = attendee.is_reception
+      ? 'bg-pink-100 text-pink-700'
+      : 'bg-yellow-100 text-yellow-700'
+    const badgeLabel = attendee.is_reception ? '懇親会あり' : '懇親会なし'
+
     return (
       <button
         key={attendee.id}
@@ -267,11 +277,16 @@ export default function CheckInPage() {
         className={`touch-manipulation select-none w-full flex items-center justify-between p-4 rounded-2xl shadow-sm transition-all ${bgClass}`}
       >
         <div className="text-left">
-          {attendee.furigana && (
-            <p className={`text-xs mb-0.5 ${attendee.checked_in || isPending ? 'text-white/80' : 'text-gray-400'}`}>
-              {attendee.furigana}
-            </p>
-          )}
+          <div className="flex items-center gap-2 mb-0.5">
+            {attendee.furigana && (
+              <p className={`text-xs ${attendee.checked_in || isPending ? 'text-white/80' : 'text-gray-400'}`}>
+                {attendee.furigana}
+              </p>
+            )}
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${badgeClass}`}>
+              {badgeLabel}
+            </span>
+          </div>
           <p className="text-lg font-medium">{attendee.name}</p>
           {isPending ? (
             <p className="text-xs text-white mt-0.5 font-semibold">素早く2回タップで取消</p>
