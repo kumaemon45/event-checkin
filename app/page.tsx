@@ -148,6 +148,7 @@ export default function CheckInPage() {
     const nameIdx = headers.indexOf('名前')
     const furiganaIdx = headers.indexOf('フリガナ')
     const productIdx = headers.indexOf('商品名')
+    alert(`ヘッダー: [${headers.join(' / ')}]\n商品名の位置: ${productIdx}\n1行目の商品名の値: "${lines[1]?.split(',')[productIdx]}"`)
 
     if (nameIdx === -1) {
       alert('「名前」列が見つかりません')
