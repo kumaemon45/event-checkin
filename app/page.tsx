@@ -32,9 +32,9 @@ export default function CheckInPage() {
   const [importing, setImporting] = useState(false)
   const [isAdultOpen, setIsAdultOpen] = useState(true)
   const [isChildOpen, setIsChildOpen] = useState(true)
-  const [pendingUncheck, setPendingUncheck] = useState<string | null>(null)
+  const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => { fetchData() }, [])
 
@@ -58,7 +58,7 @@ export default function CheckInPage() {
 
   useEffect(() => {
     return () => {
-      if (pendingTimeoutRef.current) clearTimeout(pendingTimeoutRef.current)
+      if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current)
     }
   }, [])
 
@@ -76,13 +76,14 @@ export default function CheckInPage() {
     setLoading(false)
   }
 
-  const handleTap = async (attendee: Attendee) => {
+  // カードをタップした時：未チェックインならその場でチェックイン。チェックイン済みなら「取消する」ボタンを表示するだけ
+  const handleCardTap = async (attendee: Attendee) => {
     if (attendee.checked_in) {
-      setPendingUncheck(attendee.id)
-      if (pendingTimeoutRef.current) clearTimeout(pendingTimeoutRef.current)
-      pendingTimeoutRef.current = setTimeout(() => {
-        setPendingUncheck(null)
-      }, 1000)
+      setConfirmingId(attendee.id)
+      if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current)
+      confirmTimeoutRef.current = setTimeout(() => {
+        setConfirmingId(null)
+      }, 4000)
       return
     }
 
@@ -94,16 +95,23 @@ export default function CheckInPage() {
     setChecking(null)
   }
 
-  const handleDoubleTap = async (attendee: Attendee) => {
-    if (!attendee.checked_in) return
-    if (pendingTimeoutRef.current) clearTimeout(pendingTimeoutRef.current)
-    setPendingUncheck(null)
+  // 「取消する」ボタンを明示的に押した時だけ実行
+  const handleConfirmUncheck = async (attendee: Attendee, ev: React.MouseEvent) => {
+    ev.stopPropagation()
+    if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current)
+    setConfirmingId(null)
     setChecking(attendee.id)
     await supabase.from('event_attendees').update({
       checked_in: false,
       checked_in_at: null,
     }).eq('id', attendee.id)
     setChecking(null)
+  }
+
+  const handleCancelConfirm = (ev: React.MouseEvent) => {
+    ev.stopPropagation()
+    if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current)
+    setConfirmingId(null)
   }
 
   const handleAddAdult = async () => {
@@ -250,58 +258,70 @@ export default function CheckInPage() {
 
   // 参加者ボタンの共通レンダリング
   const renderAttendeeButton = (attendee: Attendee, color: 'blue' | 'green') => {
-    const isPending = pendingUncheck === attendee.id
-    const bgClass = isPending
-      ? 'bg-orange-400 text-white'
-      : attendee.checked_in
-        ? (color === 'blue' ? 'bg-blue-500 text-white' : 'bg-green-500 text-white')
-        : 'bg-white text-gray-800 border border-gray-200'
-    const iconBg = isPending
-      ? 'bg-white text-orange-500'
-      : attendee.checked_in
-        ? 'bg-white ' + (color === 'blue' ? 'text-blue-500' : 'text-green-500')
-        : 'bg-gray-100 text-gray-300'
+    const isConfirming = confirmingId === attendee.id
+    const bgClass = attendee.checked_in
+      ? (color === 'blue' ? 'bg-blue-500 text-white' : 'bg-green-500 text-white')
+      : 'bg-white text-gray-800 border border-gray-200'
+    const iconBg = attendee.checked_in
+      ? 'bg-white ' + (color === 'blue' ? 'text-blue-500' : 'text-green-500')
+      : 'bg-gray-100 text-gray-300'
 
-    // 懇親会バッジ：チェックイン状態に関わらず常に見えるよう、白背景ベースの淡い色で統一
     const badgeClass = attendee.is_reception
       ? 'bg-pink-100 text-pink-700'
       : 'bg-yellow-100 text-yellow-700'
     const badgeLabel = attendee.is_reception ? '懇親会あり' : '懇親会なし'
 
     return (
-      <button
-        key={attendee.id}
-        onClick={() => handleTap(attendee)}
-        onDoubleClick={() => handleDoubleTap(attendee)}
-        disabled={checking === attendee.id}
-        className={`touch-manipulation select-none w-full flex items-center justify-between p-4 rounded-2xl shadow-sm transition-all ${bgClass}`}
-      >
-        <div className="text-left">
-          <div className="flex items-center gap-2 mb-0.5">
-            {attendee.furigana && (
-              <p className={`text-xs ${attendee.checked_in || isPending ? 'text-white/80' : 'text-gray-400'}`}>
-                {attendee.furigana}
-              </p>
-            )}
-            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${badgeClass}`}>
-              {badgeLabel}
-            </span>
-          </div>
-          <p className="text-lg font-medium">{attendee.name}</p>
-          {isPending ? (
-            <p className="text-xs text-white mt-0.5 font-semibold">素早く2回タップで取消</p>
-          ) : (
-            attendee.checked_in && attendee.checked_in_at && (
+      <div key={attendee.id} className="relative">
+        <button
+          type="button"
+          onClick={() => handleCardTap(attendee)}
+          disabled={checking === attendee.id}
+          className={`w-full flex items-center justify-between p-4 rounded-2xl shadow-sm transition-all select-none ${bgClass}`}
+        >
+          <div className="text-left">
+            <div className="flex items-center gap-2 mb-0.5">
+              {attendee.furigana && (
+                <p className={`text-xs ${attendee.checked_in ? 'text-white/80' : 'text-gray-400'}`}>
+                  {attendee.furigana}
+                </p>
+              )}
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${badgeClass}`}>
+                {badgeLabel}
+              </span>
+            </div>
+            <p className="text-lg font-medium">{attendee.name}</p>
+            {attendee.checked_in && attendee.checked_in_at && (
               <p className="text-xs text-white/80 mt-0.5">
                 {new Date(attendee.checked_in_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} チェックイン
               </p>
-            )
-          )}
-        </div>
-        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0 ${iconBg}`}>
-          {checking === attendee.id ? '…' : isPending ? '!' : attendee.checked_in ? '✓' : '○'}
-        </div>
-      </button>
+            )}
+          </div>
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl flex-shrink-0 ${iconBg}`}>
+            {checking === attendee.id ? '…' : attendee.checked_in ? '✓' : '○'}
+          </div>
+        </button>
+
+        {/* チェックイン済みをタップした時だけ現れる「取消する」ボタン */}
+        {isConfirming && (
+          <div className="absolute inset-0 flex items-center justify-center gap-2 rounded-2xl bg-black/60 backdrop-blur-sm">
+            <button
+              type="button"
+              onClick={(ev) => handleConfirmUncheck(attendee, ev)}
+              className="bg-orange-500 text-white px-5 py-2.5 rounded-xl font-semibold text-sm shadow-lg"
+            >
+              取消する
+            </button>
+            <button
+              type="button"
+              onClick={handleCancelConfirm}
+              className="bg-white text-gray-600 px-5 py-2.5 rounded-xl font-semibold text-sm shadow-lg"
+            >
+              閉じる
+            </button>
+          </div>
+        )}
+      </div>
     )
   }
 
