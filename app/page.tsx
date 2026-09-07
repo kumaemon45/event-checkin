@@ -76,7 +76,6 @@ export default function CheckInPage() {
     setLoading(false)
   }
 
-  // カードをタップした時：未チェックインならその場でチェックイン。チェックイン済みなら「取消する」ボタンを表示するだけ
   const handleCardTap = async (attendee: Attendee) => {
     if (attendee.checked_in) {
       setConfirmingId(attendee.id)
@@ -95,7 +94,6 @@ export default function CheckInPage() {
     setChecking(null)
   }
 
-  // 「取消する」ボタンを明示的に押した時だけ実行
   const handleConfirmUncheck = async (attendee: Attendee, ev: React.MouseEvent) => {
     ev.stopPropagation()
     if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current)
@@ -112,6 +110,14 @@ export default function CheckInPage() {
     ev.stopPropagation()
     if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current)
     setConfirmingId(null)
+  }
+
+  // 懇親会バッジをタップして あり⇔なし を切り替える
+  const handleToggleReception = async (attendee: Attendee, ev: React.MouseEvent) => {
+    ev.stopPropagation()
+    await supabase.from('event_attendees').update({
+      is_reception: !attendee.is_reception,
+    }).eq('id', attendee.id)
   }
 
   const handleAddAdult = async () => {
@@ -256,7 +262,6 @@ export default function CheckInPage() {
     )
   }
 
-  // 参加者ボタンの共通レンダリング
   const renderAttendeeButton = (attendee: Attendee, color: 'blue' | 'green') => {
     const isConfirming = confirmingId === attendee.id
     const bgClass = attendee.checked_in
@@ -286,7 +291,12 @@ export default function CheckInPage() {
                   {attendee.furigana}
                 </p>
               )}
-              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${badgeClass}`}>
+              {/* 懇親会バッジ：タップで あり⇔なし を切り替え */}
+              <span
+                role="button"
+                onClick={(ev) => handleToggleReception(attendee, ev)}
+                className={`text-[10px] px-2 py-0.5 rounded-full font-medium active:opacity-70 ${badgeClass}`}
+              >
                 {badgeLabel}
               </span>
             </div>
@@ -302,7 +312,6 @@ export default function CheckInPage() {
           </div>
         </button>
 
-        {/* チェックイン済みをタップした時だけ現れる「取消する」ボタン */}
         {isConfirming && (
           <div className="absolute inset-0 flex items-center justify-center gap-2 rounded-2xl bg-black/60 backdrop-blur-sm">
             <button
@@ -328,7 +337,6 @@ export default function CheckInPage() {
   return (
     <div className="max-w-lg mx-auto p-4 pb-8 min-h-screen bg-gray-50">
 
-      {/* ヘッダー */}
       <div className="bg-white rounded-2xl shadow-sm p-5 mb-4">
         <h1 className="text-xl font-bold text-gray-800">{event.name}</h1>
         <p className="text-gray-400 text-sm mt-1">
@@ -336,7 +344,7 @@ export default function CheckInPage() {
         </p>
         <div className="mt-4 flex gap-6">
           <div className="flex-1">
-            <p className="text-xs text-gray-400 mb-1">👤 大人</p>
+            <p className="text-xs text-gray-400 mb-1">大人</p>
             <div className="flex items-end gap-1">
               <span className="text-4xl font-bold text-blue-500">{adultChecked}</span>
               <span className="text-gray-400 mb-1">/ {adults.length} 名</span>
@@ -347,7 +355,7 @@ export default function CheckInPage() {
             </div>
           </div>
           <div className="flex-1">
-            <p className="text-xs text-gray-400 mb-1">🧒 子ども</p>
+            <p className="text-xs text-gray-400 mb-1">子ども</p>
             <div className="flex items-end gap-1">
               <span className="text-4xl font-bold text-green-500">{childChecked}</span>
               <span className="text-gray-400 mb-1">/ {children.length} 名</span>
@@ -360,24 +368,22 @@ export default function CheckInPage() {
         </div>
       </div>
 
-      {/* 検索 */}
       <div className="mb-3">
         <input
           type="text"
-          placeholder="🔍 カタカナ・漢字で検索..."
+          placeholder="カタカナ・漢字で検索..."
           value={search}
           onChange={e => setSearch(e.target.value)}
           className="w-full p-4 rounded-2xl border border-gray-200 bg-white shadow-sm text-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
         />
       </div>
 
-      {/* 大人セクション */}
       <div className="mb-3">
         <button
           onClick={() => setIsAdultOpen(!isAdultOpen)}
           className="w-full flex items-center justify-between px-4 py-3 bg-white rounded-2xl shadow-sm mb-2"
         >
-          <span className="font-semibold text-gray-700">👤 大人 ({adultChecked}/{adults.length}名)</span>
+          <span className="font-semibold text-gray-700">大人 ({adultChecked}/{adults.length}名)</span>
           <span className="text-gray-400 text-lg">{isAdultOpen ? '▲' : '▼'}</span>
         </button>
         {isAdultOpen && (
@@ -390,13 +396,12 @@ export default function CheckInPage() {
         )}
       </div>
 
-      {/* 子どもセクション */}
       <div className="mb-4">
         <button
           onClick={() => setIsChildOpen(!isChildOpen)}
           className="w-full flex items-center justify-between px-4 py-3 bg-white rounded-2xl shadow-sm mb-2"
         >
-          <span className="font-semibold text-gray-700">🧒 子ども ({childChecked}/{children.length}名)</span>
+          <span className="font-semibold text-gray-700">子ども ({childChecked}/{children.length}名)</span>
           <span className="text-gray-400 text-lg">{isChildOpen ? '▲' : '▼'}</span>
         </button>
         {isChildOpen && (
@@ -409,7 +414,6 @@ export default function CheckInPage() {
         )}
       </div>
 
-      {/* 飛び込み追加 */}
       {showAddForm ? (
         <div className="bg-white rounded-2xl shadow-sm p-4 mb-3 border border-gray-200">
           <p className="text-sm font-semibold text-gray-600 mb-3">飛び込み参加者を追加</p>
@@ -438,7 +442,7 @@ export default function CheckInPage() {
             </button>
           </div>
           <button onClick={handleAddChild} className="w-full bg-green-500 text-white py-3 rounded-xl font-semibold">
-            🧒 子どもを追加（自動採番）
+            子どもを追加（自動採番）
           </button>
         </div>
       ) : (
@@ -450,7 +454,6 @@ export default function CheckInPage() {
         </button>
       )}
 
-      {/* CSVインポート */}
       <input ref={fileInputRef} type="file" accept=".csv" onChange={handleCSVImport} className="hidden" />
       <button
         onClick={() => fileInputRef.current?.click()}
@@ -458,10 +461,9 @@ export default function CheckInPage() {
         className={`w-full py-4 rounded-2xl font-semibold text-lg mb-3 transition-colors
           ${importing ? 'bg-gray-200 text-gray-400' : 'bg-green-500 text-white hover:bg-green-600'}`}
       >
-        {importing ? '取り込み中...' : '📋 CSVで名簿を取り込む'}
+        {importing ? '取り込み中...' : 'CSVで名簿を取り込む'}
       </button>
 
-      {/* CSVダウンロード */}
       <button
         onClick={downloadCSV}
         className="w-full bg-gray-800 text-white py-4 rounded-2xl font-semibold text-lg"
