@@ -18,6 +18,7 @@ type Attendee = {
   checked_in_at: string | null
   type: 'adult' | 'child'
   is_reception: boolean
+  reception_updated_at: string | null
 }
 
 export default function CheckInPage() {
@@ -110,14 +111,6 @@ export default function CheckInPage() {
     ev.stopPropagation()
     if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current)
     setConfirmingId(null)
-  }
-
-  // 懇親会バッジをタップして あり⇔なし を切り替える
-  const handleToggleReception = async (attendee: Attendee, ev: React.MouseEvent) => {
-    ev.stopPropagation()
-    await supabase.from('event_attendees').update({
-      is_reception: !attendee.is_reception,
-    }).eq('id', attendee.id)
   }
 
   const handleAddAdult = async () => {
@@ -291,12 +284,8 @@ export default function CheckInPage() {
                   {attendee.furigana}
                 </p>
               )}
-              {/* 懇親会バッジ：タップで あり⇔なし を切り替え */}
-              <span
-                role="button"
-                onClick={(ev) => handleToggleReception(attendee, ev)}
-                className={`text-[10px] px-2 py-0.5 rounded-full font-medium active:opacity-70 ${badgeClass}`}
-              >
+              {/* 懇親会バッジ：表示のみ、タップ不可 */}
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${badgeClass}`}>
                 {badgeLabel}
               </span>
             </div>
