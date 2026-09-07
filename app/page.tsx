@@ -50,7 +50,10 @@ export default function CheckInPage() {
       )
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'event_attendees' },
         (payload) => {
-          setAttendees(prev => [...prev, payload.new as Attendee])
+          setAttendees(prev => {
+            if (prev.some(a => a.id === payload.new.id)) return prev
+            return [...prev, payload.new as Attendee]
+          })
         }
       )
       .subscribe()
@@ -88,10 +91,13 @@ export default function CheckInPage() {
     }
 
     setChecking(attendee.id)
-    await supabase.from('event_attendees').update({
+    const { data } = await supabase.from('event_attendees').update({
       checked_in: true,
       checked_in_at: new Date().toISOString(),
-    }).eq('id', attendee.id)
+    }).eq('id', attendee.id).select().single()
+    if (data) {
+      setAttendees(prev => prev.map(a => a.id === data.id ? { ...a, ...data } as Attendee : a))
+    }
     setChecking(null)
   }
 
@@ -100,10 +106,13 @@ export default function CheckInPage() {
     if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current)
     setConfirmingId(null)
     setChecking(attendee.id)
-    await supabase.from('event_attendees').update({
+    const { data } = await supabase.from('event_attendees').update({
       checked_in: false,
       checked_in_at: null,
-    }).eq('id', attendee.id)
+    }).eq('id', attendee.id).select().single()
+    if (data) {
+      setAttendees(prev => prev.map(a => a.id === data.id ? { ...a, ...data } as Attendee : a))
+    }
     setChecking(null)
   }
 
@@ -115,7 +124,7 @@ export default function CheckInPage() {
 
   const handleAddAdult = async () => {
     if (!newName.trim() || !event) return
-    await supabase.from('event_attendees').insert({
+    const { data, error } = await supabase.from('event_attendees').insert({
       event_id: event.id,
       name: newName.trim(),
       furigana: newFurigana.trim() || null,
@@ -123,7 +132,18 @@ export default function CheckInPage() {
       is_reception: false,
       checked_in: true,
       checked_in_at: new Date().toISOString(),
-    })
+    }).select().single()
+
+    if (error) {
+      alert('追加に失敗しました: ' + error.message)
+      return
+    }
+    if (data) {
+      setAttendees(prev => {
+        if (prev.some(a => a.id === data.id)) return prev
+        return [...prev, data as Attendee]
+      })
+    }
     setNewName('')
     setNewFurigana('')
     setShowAddForm(false)
@@ -133,7 +153,7 @@ export default function CheckInPage() {
     if (!event) return
     const childCount = attendees.filter(a => a.type === 'child').length
     const childName = `子ども${childCount + 1}`
-    await supabase.from('event_attendees').insert({
+    const { data, error } = await supabase.from('event_attendees').insert({
       event_id: event.id,
       name: childName,
       furigana: null,
@@ -141,7 +161,18 @@ export default function CheckInPage() {
       is_reception: false,
       checked_in: true,
       checked_in_at: new Date().toISOString(),
-    })
+    }).select().single()
+
+    if (error) {
+      alert('追加に失敗しました: ' + error.message)
+      return
+    }
+    if (data) {
+      setAttendees(prev => {
+        if (prev.some(a => a.id === data.id)) return prev
+        return [...prev, data as Attendee]
+      })
+    }
   }
 
   const handleCSVImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -193,10 +224,17 @@ export default function CheckInPage() {
       return
     }
 
-    const { error } = await supabase.from('event_attendees').insert(toInsert)
+    const { data, error } = await supabase.from('event_attendees').insert(toInsert).select()
     if (error) {
       alert('エラー: ' + error.message)
     } else {
+      if (data) {
+        setAttendees(prev => {
+          const existingIds = new Set(prev.map(a => a.id))
+          const toAdd = (data as Attendee[]).filter(a => !existingIds.has(a.id))
+          return [...prev, ...toAdd]
+        })
+      }
       const receptionCount = toInsert.filter(a => a.is_reception).length
       alert(`${toInsert.length}名を取り込みました（懇親会あり: ${receptionCount}名）`)
     }
@@ -284,7 +322,6 @@ export default function CheckInPage() {
                   {attendee.furigana}
                 </p>
               )}
-              {/* 懇親会バッジ：表示のみ、タップ不可 */}
               <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${badgeClass}`}>
                 {badgeLabel}
               </span>
