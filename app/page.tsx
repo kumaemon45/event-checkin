@@ -271,7 +271,8 @@ export default function CheckInPage() {
     if (!search) return true
     return (
       a.name.includes(search) ||
-      (a.furigana ? a.furigana.includes(search) : false)
+      (a.furigana ? a.furigana.includes(search) : false) ||
+      (a.email ? a.email.toLowerCase().includes(search.toLowerCase()) : false)
     )
   }
 
@@ -402,7 +403,7 @@ export default function CheckInPage() {
       <div className="mb-3">
         <input
           type="text"
-          placeholder="カタカナ・漢字で検索..."
+          placeholder="名前・フリガナ・メールアドレスで検索..."
           value={search}
           onChange={e => setSearch(e.target.value)}
           className="w-full p-4 rounded-2xl border border-gray-200 bg-white shadow-sm text-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
