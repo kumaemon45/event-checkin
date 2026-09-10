@@ -14,6 +14,7 @@ type Attendee = {
   event_id: string
   name: string
   furigana: string | null
+  email: string | null
   checked_in: boolean
   checked_in_at: string | null
   type: 'adult' | 'child'
@@ -185,6 +186,7 @@ export default function CheckInPage() {
     const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''))
     const nameIdx = headers.indexOf('名前')
     const furiganaIdx = headers.indexOf('フリガナ')
+    const emailIdx = headers.indexOf('メールアドレス')
     const productIdx = headers.indexOf('商品名')
 
     if (nameIdx === -1) {
@@ -199,6 +201,7 @@ export default function CheckInPage() {
         return {
           name: cols[nameIdx],
           furigana: furiganaIdx !== -1 ? cols[furiganaIdx] || null : null,
+          email: emailIdx !== -1 ? cols[emailIdx] || null : null,
           is_reception: productIdx !== -1 ? cols[productIdx]?.includes('懇親会') || false : false,
         }
       })
@@ -211,6 +214,7 @@ export default function CheckInPage() {
         event_id: event.id,
         name: entry.name,
         furigana: entry.furigana,
+        email: entry.email,
         type: 'adult',
         is_reception: entry.is_reception,
         checked_in: false,
@@ -243,10 +247,11 @@ export default function CheckInPage() {
   }
 
   const downloadCSV = () => {
-    const headers = ['名前', 'フリガナ', '種別', '懇親会', 'チェックイン', 'チェックイン時間']
+    const headers = ['名前', 'フリガナ', 'メールアドレス', '種別', '懇親会', 'チェックイン', 'チェックイン時間']
     const rows = attendees.map(a => [
       a.name,
       a.furigana || '',
+      a.email || '',
       a.type === 'child' ? '子ども' : '大人',
       a.is_reception ? 'あり' : 'なし',
       a.checked_in ? '済' : '未',
