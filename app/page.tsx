@@ -125,7 +125,6 @@ export default function CheckInPage() {
     setConfirmingId(null)
   }
 
-  // 大人を追加：連打防止 ＋ 同名チェック
   const handleAddAdult = async () => {
     if (!newName.trim() || !event || addingAdult) return
 
@@ -164,7 +163,6 @@ export default function CheckInPage() {
     setAddingAdult(false)
   }
 
-  // 子どもを追加：連打防止（同一番号の重複作成を防ぐ）
   const handleAddChild = async () => {
     if (!event || addingChild) return
     setAddingChild(true)
@@ -266,6 +264,8 @@ export default function CheckInPage() {
   }
 
   const downloadCSV = () => {
+    const now = new Date()
+    const exportedAt = now.toLocaleString('ja-JP')
     const headers = ['名前', 'フリガナ', 'メールアドレス', '種別', '懇親会', 'チェックイン', 'チェックイン時間']
     const rows = attendees.map(a => [
       a.name,
@@ -276,12 +276,17 @@ export default function CheckInPage() {
       a.checked_in ? '済' : '未',
       a.checked_in_at ? new Date(a.checked_in_at).toLocaleString('ja-JP') : '',
     ])
-    const csv = [headers, ...rows].map(row => row.join(',')).join('\n')
+    const csv = [
+      [`出力日時: ${exportedAt}`],
+      headers,
+      ...rows
+    ].map(row => row.join(',')).join('\n')
     const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `checkin_${new Date().toLocaleDateString('ja-JP').replace(/\//g, '-')}.csv`
+    const fileTimestamp = now.toLocaleString('ja-JP').replace(/[\/:]/g, '-').replace(/\s/g, '_')
+    a.download = `checkin_${fileTimestamp}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
