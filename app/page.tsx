@@ -32,6 +32,8 @@ export default function CheckInPage() {
   const [showAddForm, setShowAddForm] = useState(false)
   const [checking, setChecking] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
+  const [addingAdult, setAddingAdult] = useState(false)
+  const [addingChild, setAddingChild] = useState(false)
   const [isAdultOpen, setIsAdultOpen] = useState(true)
   const [isChildOpen, setIsChildOpen] = useState(true)
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
@@ -123,11 +125,21 @@ export default function CheckInPage() {
     setConfirmingId(null)
   }
 
+  // 大人を追加：連打防止 ＋ 同名チェック
   const handleAddAdult = async () => {
-    if (!newName.trim() || !event) return
+    if (!newName.trim() || !event || addingAdult) return
+
+    const trimmedName = newName.trim()
+    const alreadyExists = attendees.some(a => a.name === trimmedName)
+    if (alreadyExists) {
+      const proceed = confirm(`「${trimmedName}」は既に登録されています。それでも追加しますか？`)
+      if (!proceed) return
+    }
+
+    setAddingAdult(true)
     const { data, error } = await supabase.from('event_attendees').insert({
       event_id: event.id,
-      name: newName.trim(),
+      name: trimmedName,
       furigana: newFurigana.trim() || null,
       type: 'adult',
       is_reception: false,
@@ -137,6 +149,7 @@ export default function CheckInPage() {
 
     if (error) {
       alert('追加に失敗しました: ' + error.message)
+      setAddingAdult(false)
       return
     }
     if (data) {
@@ -148,10 +161,14 @@ export default function CheckInPage() {
     setNewName('')
     setNewFurigana('')
     setShowAddForm(false)
+    setAddingAdult(false)
   }
 
+  // 子どもを追加：連打防止（同一番号の重複作成を防ぐ）
   const handleAddChild = async () => {
-    if (!event) return
+    if (!event || addingChild) return
+    setAddingChild(true)
+
     const childCount = attendees.filter(a => a.type === 'child').length
     const childName = `子ども${childCount + 1}`
     const { data, error } = await supabase.from('event_attendees').insert({
@@ -166,6 +183,7 @@ export default function CheckInPage() {
 
     if (error) {
       alert('追加に失敗しました: ' + error.message)
+      setAddingChild(false)
       return
     }
     if (data) {
@@ -174,6 +192,7 @@ export default function CheckInPage() {
         return [...prev, data as Attendee]
       })
     }
+    setAddingChild(false)
   }
 
   const handleCSVImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -466,15 +485,23 @@ export default function CheckInPage() {
             autoFocus
           />
           <div className="flex gap-2 mb-2">
-            <button onClick={handleAddAdult} className="flex-1 bg-blue-500 text-white py-3 rounded-xl font-semibold">
-              大人を追加
+            <button
+              onClick={handleAddAdult}
+              disabled={addingAdult}
+              className={`flex-1 text-white py-3 rounded-xl font-semibold ${addingAdult ? 'bg-blue-300' : 'bg-blue-500'}`}
+            >
+              {addingAdult ? '追加中...' : '大人を追加'}
             </button>
             <button onClick={() => { setShowAddForm(false); setNewName(''); setNewFurigana('') }} className="flex-1 bg-gray-100 text-gray-500 py-3 rounded-xl font-semibold">
               キャンセル
             </button>
           </div>
-          <button onClick={handleAddChild} className="w-full bg-green-500 text-white py-3 rounded-xl font-semibold">
-            子どもを追加（自動採番）
+          <button
+            onClick={handleAddChild}
+            disabled={addingChild}
+            className={`w-full text-white py-3 rounded-xl font-semibold ${addingChild ? 'bg-green-300' : 'bg-green-500'}`}
+          >
+            {addingChild ? '追加中...' : '子どもを追加（自動採番）'}
           </button>
         </div>
       ) : (
