@@ -29,6 +29,7 @@ export default function CheckInPage() {
   const [loading, setLoading] = useState(true)
   const [newName, setNewName] = useState('')
   const [newFurigana, setNewFurigana] = useState('')
+  const [newIsReception, setNewIsReception] = useState(false)
   const [showAddForm, setShowAddForm] = useState(false)
   const [checking, setChecking] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
@@ -42,7 +43,6 @@ export default function CheckInPage() {
 
   useEffect(() => { fetchData() }, [])
 
-  // 30秒ごとに自動で最新データを取り直す（リアルタイム接続が切れても追いつくため）
   useEffect(() => {
     const interval = setInterval(() => {
       fetchData()
@@ -149,7 +149,7 @@ export default function CheckInPage() {
       name: trimmedName,
       furigana: newFurigana.trim() || null,
       type: 'adult',
-      is_reception: false,
+      is_reception: newIsReception,
       checked_in: true,
       checked_in_at: new Date().toISOString(),
     }).select().single()
@@ -167,6 +167,7 @@ export default function CheckInPage() {
     }
     setNewName('')
     setNewFurigana('')
+    setNewIsReception(false)
     setShowAddForm(false)
     setAddingAdult(false)
   }
@@ -497,6 +498,27 @@ export default function CheckInPage() {
             className="w-full p-3 border border-gray-200 rounded-xl mb-3 focus:outline-none focus:ring-2 focus:ring-blue-400 text-lg"
             autoFocus
           />
+
+          <p className="text-xs font-semibold text-gray-500 mb-2">懇親会</p>
+          <div className="flex gap-2 mb-3">
+            <button
+              type="button"
+              onClick={() => setNewIsReception(false)}
+              className={`flex-1 py-2.5 rounded-xl font-semibold text-sm border-2 transition-colors
+                ${!newIsReception ? 'bg-yellow-100 border-yellow-300 text-yellow-700' : 'bg-white border-gray-200 text-gray-400'}`}
+            >
+              懇親会なし
+            </button>
+            <button
+              type="button"
+              onClick={() => setNewIsReception(true)}
+              className={`flex-1 py-2.5 rounded-xl font-semibold text-sm border-2 transition-colors
+                ${newIsReception ? 'bg-pink-100 border-pink-300 text-pink-700' : 'bg-white border-gray-200 text-gray-400'}`}
+            >
+              懇親会あり
+            </button>
+          </div>
+
           <div className="flex gap-2 mb-2">
             <button
               onClick={handleAddAdult}
@@ -505,7 +527,7 @@ export default function CheckInPage() {
             >
               {addingAdult ? '追加中...' : '大人を追加'}
             </button>
-            <button onClick={() => { setShowAddForm(false); setNewName(''); setNewFurigana('') }} className="flex-1 bg-gray-100 text-gray-500 py-3 rounded-xl font-semibold">
+            <button onClick={() => { setShowAddForm(false); setNewName(''); setNewFurigana(''); setNewIsReception(false) }} className="flex-1 bg-gray-100 text-gray-500 py-3 rounded-xl font-semibold">
               キャンセル
             </button>
           </div>
