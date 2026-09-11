@@ -42,6 +42,14 @@ export default function CheckInPage() {
 
   useEffect(() => { fetchData() }, [])
 
+  // 30秒ごとに自動で最新データを取り直す（リアルタイム接続が切れても追いつくため）
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchData()
+    }, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
   useEffect(() => {
     if (!event) return
     const channel = supabase
