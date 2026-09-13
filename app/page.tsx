@@ -23,6 +23,8 @@ type Attendee = {
   guardian_id: string | null
 }
 
+const STAFF_NAME_KEY = 'event_checkin_staff_name'
+
 export default function CheckInPage() {
   const [event, setEvent] = useState<Event | null>(null)
   const [attendees, setAttendees] = useState<Attendee[]>([])
@@ -40,8 +42,37 @@ export default function CheckInPage() {
   const [isAdultOpen, setIsAdultOpen] = useState(true)
   const [isChildOpen, setIsChildOpen] = useState(true)
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
+  const [staffName, setStaffName] = useState<string | null>(null)
+  const [staffNameInput, setStaffNameInput] = useState('')
+  const [staffNameLoaded, setStaffNameLoaded] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // 端末に保存された担当者名を読み込む
+  useEffect(() => {
+    const saved = localStorage.getItem(STAFF_NAME_KEY)
+    if (saved) setStaffName(saved)
+    setStaffNameLoaded(true)
+  }, [])
+
+  const handleSetStaffName = () => {
+    const trimmed = staffNameInput.trim()
+    if (!trimmed) return
+    localStorage.setItem(STAFF_NAME_KEY, trimmed)
+    setStaffName(trimmed)
+  }
+
+  // 操作履歴を記録する共通関数
+  const logAction = async (action: string, targetName: string, detail?: string) => {
+    if (!event || !staffName) return
+    await supabase.from('event_action_logs').insert({
+      event_id: event.id,
+      staff_name: staffName,
+      action,
+      target_name: targetName,
+      detail: detail || null,
+    })
+  }
 
   useEffect(() => { fetchData() }, [])
 
@@ -111,6 +142,7 @@ export default function CheckInPage() {
     if (data) {
       setAttendees(prev => prev.map(a => a.id === data.id ? { ...a, ...data } as Attendee : a))
     }
+    await logAction('チェックイン', attendee.name)
     setChecking(null)
   }
 
@@ -126,6 +158,7 @@ export default function CheckInPage() {
     if (data) {
       setAttendees(prev => prev.map(a => a.id === data.id ? { ...a, ...data } as Attendee : a))
     }
+    await logAction('チェックイン取消', attendee.name)
     setChecking(null)
   }
 
@@ -167,6 +200,7 @@ export default function CheckInPage() {
         return [...prev, data as Attendee]
       })
     }
+    await logAction('大人を追加', trimmedName, newIsReception ? '懇親会あり' : '懇親会なし')
     setNewName('')
     setNewFurigana('')
     setNewIsReception(false)
@@ -174,7 +208,6 @@ export default function CheckInPage() {
     setAddingAdult(false)
   }
 
-  // 子どもを追加（保護者なし＝手動フォームからの追加）
   const handleAddChild = async () => {
     if (!event || addingChild) return
     setAddingChild(true)
@@ -203,10 +236,10 @@ export default function CheckInPage() {
         return [...prev, data as Attendee]
       })
     }
+    await logAction('子どもを追加', childName, '保護者なし')
     setAddingChild(false)
   }
 
-  // 大人カードの「＋子ども」ボタン：その大人に紐づいた子どもを即座に追加
   const handleAddChildFor = async (guardian: Attendee) => {
     if (!event || addingChildFor) return
     setAddingChildFor(guardian.id)
@@ -235,6 +268,7 @@ export default function CheckInPage() {
         return [...prev, data as Attendee]
       })
     }
+    await logAction('子どもを追加', childName, `保護者: ${guardian.name}`)
     setAddingChildFor(null)
   }
 
@@ -302,6 +336,7 @@ export default function CheckInPage() {
         })
       }
       const receptionCount = toInsert.filter(a => a.is_reception).length
+      await logAction('CSV取り込み', file.name, `${toInsert.length}名（懇親会あり: ${receptionCount}名）`)
       alert(`${toInsert.length}名を取り込みました（懇親会あり: ${receptionCount}名）`)
     }
     setImporting(false)
@@ -354,6 +389,44 @@ export default function CheckInPage() {
   const adultChecked = adults.filter(a => a.checked_in).length
   const childChecked = children.filter(a => a.checked_in).length
   const idToName = new Map(attendees.map(a => [a.id, a.name]))
+
+  // 端末の担当者名がまだ読み込み中
+  if (!staffNameLoaded) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <p className="text-gray-400 text-lg">読み込み中...</p>
+      </div>
+    )
+  }
+
+  // 担当者名が未設定なら、名前入力画面を表示
+  if (!staffName) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gray-50 p-4">
+        <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm p-6">
+          <h1 className="text-lg font-bold text-gray-800 mb-2">受付担当者の確認</h1>
+          <p className="text-sm text-gray-500 mb-4">
+            誰が対応したか記録するため、最初にあなたの名前を入力してください。この端末では次回から表示されません。
+          </p>
+          <input
+            type="text"
+            placeholder="例：田中"
+            value={staffNameInput}
+            onChange={e => setStaffNameInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSetStaffName()}
+            className="w-full p-3 border border-gray-200 rounded-xl mb-3 focus:outline-none focus:ring-2 focus:ring-blue-400 text-lg"
+            autoFocus
+          />
+          <button
+            onClick={handleSetStaffName}
+            className="w-full bg-blue-500 text-white py-3 rounded-xl font-semibold"
+          >
+            この名前で始める
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   if (loading) {
     return (
@@ -427,7 +500,6 @@ export default function CheckInPage() {
           </div>
         </button>
 
-        {/* 大人カードにだけ「＋子ども」ボタンを添える */}
         {attendee.type === 'adult' && !isConfirming && (
           <button
             type="button"
@@ -465,7 +537,10 @@ export default function CheckInPage() {
     <div className="max-w-lg mx-auto p-4 pb-8 min-h-screen bg-gray-50">
 
       <div className="bg-white rounded-2xl shadow-sm p-5 mb-4">
-        <h1 className="text-xl font-bold text-gray-800">{event.name}</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold text-gray-800">{event.name}</h1>
+          <span className="text-xs text-gray-400">担当: {staffName}</span>
+        </div>
         <p className="text-gray-400 text-sm mt-1">
           {new Date(event.event_date).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}
         </p>
