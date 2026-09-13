@@ -20,6 +20,7 @@ type Attendee = {
   type: 'adult' | 'child'
   is_reception: boolean
   reception_updated_at: string | null
+  guardian_id: string | null
 }
 
 export default function CheckInPage() {
@@ -35,6 +36,7 @@ export default function CheckInPage() {
   const [importing, setImporting] = useState(false)
   const [addingAdult, setAddingAdult] = useState(false)
   const [addingChild, setAddingChild] = useState(false)
+  const [addingChildFor, setAddingChildFor] = useState<string | null>(null)
   const [isAdultOpen, setIsAdultOpen] = useState(true)
   const [isChildOpen, setIsChildOpen] = useState(true)
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
@@ -172,6 +174,7 @@ export default function CheckInPage() {
     setAddingAdult(false)
   }
 
+  // 子どもを追加（保護者なし＝手動フォームからの追加）
   const handleAddChild = async () => {
     if (!event || addingChild) return
     setAddingChild(true)
@@ -186,6 +189,7 @@ export default function CheckInPage() {
       is_reception: false,
       checked_in: true,
       checked_in_at: new Date().toISOString(),
+      guardian_id: null,
     }).select().single()
 
     if (error) {
@@ -200,6 +204,38 @@ export default function CheckInPage() {
       })
     }
     setAddingChild(false)
+  }
+
+  // 大人カードの「＋子ども」ボタン：その大人に紐づいた子どもを即座に追加
+  const handleAddChildFor = async (guardian: Attendee) => {
+    if (!event || addingChildFor) return
+    setAddingChildFor(guardian.id)
+
+    const childCount = attendees.filter(a => a.type === 'child').length
+    const childName = `子ども${childCount + 1}`
+    const { data, error } = await supabase.from('event_attendees').insert({
+      event_id: event.id,
+      name: childName,
+      furigana: null,
+      type: 'child',
+      is_reception: false,
+      checked_in: true,
+      checked_in_at: new Date().toISOString(),
+      guardian_id: guardian.id,
+    }).select().single()
+
+    if (error) {
+      alert('追加に失敗しました: ' + error.message)
+      setAddingChildFor(null)
+      return
+    }
+    if (data) {
+      setAttendees(prev => {
+        if (prev.some(a => a.id === data.id)) return prev
+        return [...prev, data as Attendee]
+      })
+    }
+    setAddingChildFor(null)
   }
 
   const handleCSVImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -275,12 +311,14 @@ export default function CheckInPage() {
   const downloadCSV = () => {
     const now = new Date()
     const exportedAt = now.toLocaleString('ja-JP')
-    const headers = ['名前', 'フリガナ', 'メールアドレス', '種別', '懇親会', 'チェックイン', 'チェックイン時間']
+    const idToName = new Map(attendees.map(a => [a.id, a.name]))
+    const headers = ['名前', 'フリガナ', 'メールアドレス', '種別', '保護者', '懇親会', 'チェックイン', 'チェックイン時間']
     const rows = attendees.map(a => [
       a.name,
       a.furigana || '',
       a.email || '',
       a.type === 'child' ? '子ども' : '大人',
+      a.guardian_id ? (idToName.get(a.guardian_id) || '') : '',
       a.is_reception ? 'あり' : 'なし',
       a.checked_in ? '済' : '未',
       a.checked_in_at ? new Date(a.checked_in_at).toLocaleString('ja-JP') : '',
@@ -315,6 +353,7 @@ export default function CheckInPage() {
   const filteredChildren = children.filter(matchesSearch)
   const adultChecked = adults.filter(a => a.checked_in).length
   const childChecked = children.filter(a => a.checked_in).length
+  const idToName = new Map(attendees.map(a => [a.id, a.name]))
 
   if (loading) {
     return (
@@ -346,6 +385,10 @@ export default function CheckInPage() {
       : 'bg-yellow-100 text-yellow-700'
     const badgeLabel = attendee.is_reception ? '懇親会あり' : '懇親会なし'
 
+    const guardianName = attendee.type === 'child' && attendee.guardian_id
+      ? idToName.get(attendee.guardian_id)
+      : null
+
     return (
       <div key={attendee.id} className="relative">
         <button
@@ -361,11 +404,18 @@ export default function CheckInPage() {
                   {attendee.furigana}
                 </p>
               )}
-              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${badgeClass}`}>
-                {badgeLabel}
-              </span>
+              {attendee.type === 'adult' && (
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${badgeClass}`}>
+                  {badgeLabel}
+                </span>
+              )}
             </div>
             <p className="text-lg font-medium">{attendee.name}</p>
+            {guardianName && (
+              <p className={`text-xs mt-0.5 ${attendee.checked_in ? 'text-white/80' : 'text-gray-400'}`}>
+                保護者: {guardianName}
+              </p>
+            )}
             {attendee.checked_in && attendee.checked_in_at && (
               <p className="text-xs text-white/80 mt-0.5">
                 {new Date(attendee.checked_in_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} チェックイン
@@ -376,6 +426,18 @@ export default function CheckInPage() {
             {checking === attendee.id ? '…' : attendee.checked_in ? '✓' : '○'}
           </div>
         </button>
+
+        {/* 大人カードにだけ「＋子ども」ボタンを添える */}
+        {attendee.type === 'adult' && !isConfirming && (
+          <button
+            type="button"
+            onClick={(ev) => { ev.stopPropagation(); handleAddChildFor(attendee) }}
+            disabled={addingChildFor === attendee.id}
+            className="absolute -bottom-2 right-3 bg-white border border-gray-200 shadow-sm text-gray-600 text-xs px-2.5 py-1 rounded-full font-semibold"
+          >
+            {addingChildFor === attendee.id ? '追加中...' : '＋子ども'}
+          </button>
+        )}
 
         {isConfirming && (
           <div className="absolute inset-0 flex items-center justify-center gap-2 rounded-2xl bg-black/60 backdrop-blur-sm">
@@ -452,7 +514,7 @@ export default function CheckInPage() {
           <span className="text-gray-400 text-lg">{isAdultOpen ? '▲' : '▼'}</span>
         </button>
         {isAdultOpen && (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {filteredAdults.map(attendee => renderAttendeeButton(attendee, 'blue'))}
             {filteredAdults.length === 0 && (
               <p className="text-center text-gray-300 py-6">該当者なし</p>
@@ -536,7 +598,7 @@ export default function CheckInPage() {
             disabled={addingChild}
             className={`w-full text-white py-3 rounded-xl font-semibold ${addingChild ? 'bg-green-300' : 'bg-green-500'}`}
           >
-            {addingChild ? '追加中...' : '子どもを追加（自動採番）'}
+            {addingChild ? '追加中...' : '子どもを追加（保護者なし・自動採番）'}
           </button>
         </div>
       ) : (
