@@ -15,6 +15,7 @@ type Attendee = {
   name: string
   furigana: string | null
   email: string | null
+  phone: string | null
   checked_in: boolean
   checked_in_at: string | null
   type: 'adult' | 'child'
@@ -48,7 +49,6 @@ export default function CheckInPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // 端末に保存された担当者名を読み込む
   useEffect(() => {
     const saved = localStorage.getItem(STAFF_NAME_KEY)
     if (saved) setStaffName(saved)
@@ -62,7 +62,6 @@ export default function CheckInPage() {
     setStaffName(trimmed)
   }
 
-  // 操作履歴を記録する共通関数
   const logAction = async (action: string, targetName: string, detail?: string) => {
     if (!event || !staffName) return
     await supabase.from('event_action_logs').insert({
@@ -283,6 +282,7 @@ export default function CheckInPage() {
     const nameIdx = headers.indexOf('名前')
     const furiganaIdx = headers.indexOf('フリガナ')
     const emailIdx = headers.indexOf('メールアドレス')
+    const phoneIdx = headers.indexOf('電話番号')
     const productIdx = headers.indexOf('商品名')
 
     if (nameIdx === -1) {
@@ -298,6 +298,7 @@ export default function CheckInPage() {
           name: cols[nameIdx],
           furigana: furiganaIdx !== -1 ? cols[furiganaIdx] || null : null,
           email: emailIdx !== -1 ? cols[emailIdx] || null : null,
+          phone: phoneIdx !== -1 ? cols[phoneIdx] || null : null,
           is_reception: productIdx !== -1 ? cols[productIdx]?.includes('懇親会') || false : false,
         }
       })
@@ -311,6 +312,7 @@ export default function CheckInPage() {
         name: entry.name,
         furigana: entry.furigana,
         email: entry.email,
+        phone: entry.phone,
         type: 'adult',
         is_reception: entry.is_reception,
         checked_in: false,
@@ -347,11 +349,12 @@ export default function CheckInPage() {
     const now = new Date()
     const exportedAt = now.toLocaleString('ja-JP')
     const idToName = new Map(attendees.map(a => [a.id, a.name]))
-    const headers = ['名前', 'フリガナ', 'メールアドレス', '種別', '保護者', '懇親会', 'チェックイン', 'チェックイン時間']
+    const headers = ['名前', 'フリガナ', 'メールアドレス', '電話番号', '種別', '保護者', '懇親会', 'チェックイン', 'チェックイン時間']
     const rows = attendees.map(a => [
       a.name,
       a.furigana || '',
       a.email || '',
+      a.phone || '',
       a.type === 'child' ? '子ども' : '大人',
       a.guardian_id ? (idToName.get(a.guardian_id) || '') : '',
       a.is_reception ? 'あり' : 'なし',
@@ -378,7 +381,8 @@ export default function CheckInPage() {
     return (
       a.name.includes(search) ||
       (a.furigana ? a.furigana.includes(search) : false) ||
-      (a.email ? a.email.toLowerCase().includes(search.toLowerCase()) : false)
+      (a.email ? a.email.toLowerCase().includes(search.toLowerCase()) : false) ||
+      (a.phone ? a.phone.includes(search) : false)
     )
   }
 
@@ -390,7 +394,6 @@ export default function CheckInPage() {
   const childChecked = children.filter(a => a.checked_in).length
   const idToName = new Map(attendees.map(a => [a.id, a.name]))
 
-  // 端末の担当者名がまだ読み込み中
   if (!staffNameLoaded) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
@@ -399,7 +402,6 @@ export default function CheckInPage() {
     )
   }
 
-  // 担当者名が未設定なら、名前入力画面を表示
   if (!staffName) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50 p-4">
@@ -573,7 +575,7 @@ export default function CheckInPage() {
       <div className="mb-3">
         <input
           type="text"
-          placeholder="名前・フリガナ・メールアドレスで検索..."
+          placeholder="名前・フリガナ・メール・電話下4桁で検索..."
           value={search}
           onChange={e => setSearch(e.target.value)}
           className="w-full p-4 rounded-2xl border border-gray-200 bg-white shadow-sm text-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
