@@ -22,6 +22,7 @@ type Attendee = {
   is_reception: boolean
   reception_updated_at: string | null
   guardian_id: string | null
+  source: string | null
 }
 
 const STAFF_NAME_KEY = 'event_checkin_staff_name'
@@ -40,6 +41,7 @@ export default function CheckInPage() {
   const [addingAdult, setAddingAdult] = useState(false)
   const [addingChild, setAddingChild] = useState(false)
   const [addingChildFor, setAddingChildFor] = useState<string | null>(null)
+  const [togglingReception, setTogglingReception] = useState<string | null>(null)
   const [isAdultOpen, setIsAdultOpen] = useState(true)
   const [isChildOpen, setIsChildOpen] = useState(true)
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
@@ -167,6 +169,36 @@ export default function CheckInPage() {
     setConfirmingId(null)
   }
 
+  // 懇親会バッジをタップ：確認ダイアログを経て変更、履歴に記録
+  const handleToggleReception = async (attendee: Attendee, ev: React.MouseEvent) => {
+    ev.stopPropagation()
+    if (togglingReception) return
+
+    const newValue = !attendee.is_reception
+    const message = newValue
+      ? `「${attendee.name}」を懇親会ありに変更しますか？`
+      : `「${attendee.name}」を懇親会なし（キャンセル）に変更しますか？`
+    const proceed = confirm(message)
+    if (!proceed) return
+
+    setTogglingReception(attendee.id)
+    const { data, error } = await supabase.from('event_attendees').update({
+      is_reception: newValue,
+      reception_updated_at: new Date().toISOString(),
+    }).eq('id', attendee.id).select().single()
+
+    if (error) {
+      alert('変更に失敗しました: ' + error.message)
+      setTogglingReception(null)
+      return
+    }
+    if (data) {
+      setAttendees(prev => prev.map(a => a.id === data.id ? { ...a, ...data } as Attendee : a))
+    }
+    await logAction('懇親会変更', attendee.name, newValue ? 'なし→あり' : 'あり→なし')
+    setTogglingReception(null)
+  }
+
   const handleAddAdult = async () => {
     if (!newName.trim() || !event || addingAdult) return
 
@@ -186,6 +218,7 @@ export default function CheckInPage() {
       is_reception: newIsReception,
       checked_in: true,
       checked_in_at: new Date().toISOString(),
+      source: 'walkin',
     }).select().single()
 
     if (error) {
@@ -222,6 +255,7 @@ export default function CheckInPage() {
       checked_in: true,
       checked_in_at: new Date().toISOString(),
       guardian_id: null,
+      source: 'walkin',
     }).select().single()
 
     if (error) {
@@ -254,6 +288,7 @@ export default function CheckInPage() {
       checked_in: true,
       checked_in_at: new Date().toISOString(),
       guardian_id: guardian.id,
+      source: 'walkin',
     }).select().single()
 
     if (error) {
@@ -317,6 +352,7 @@ export default function CheckInPage() {
         is_reception: entry.is_reception,
         checked_in: false,
         checked_in_at: null,
+        source: 'csv_import',
       }))
 
     if (toInsert.length === 0) {
@@ -349,15 +385,17 @@ export default function CheckInPage() {
     const now = new Date()
     const exportedAt = now.toLocaleString('ja-JP')
     const idToName = new Map(attendees.map(a => [a.id, a.name]))
-    const headers = ['名前', 'フリガナ', 'メールアドレス', '電話番号', '種別', '保護者', '懇親会', 'チェックイン', 'チェックイン時間']
+    const headers = ['名前', 'フリガナ', 'メールアドレス', '電話番号', '種別', '登録元', '保護者', '懇親会', '懇親会変更日時', 'チェックイン', 'チェックイン時間']
     const rows = attendees.map(a => [
       a.name,
       a.furigana || '',
       a.email || '',
       a.phone || '',
       a.type === 'child' ? '子ども' : '大人',
+      a.source === 'walkin' ? '当日追加' : '事前登録',
       a.guardian_id ? (idToName.get(a.guardian_id) || '') : '',
       a.is_reception ? 'あり' : 'なし',
+      a.reception_updated_at ? new Date(a.reception_updated_at).toLocaleString('ja-JP') : '',
       a.checked_in ? '済' : '未',
       a.checked_in_at ? new Date(a.checked_in_at).toLocaleString('ja-JP') : '',
     ])
@@ -372,6 +410,62 @@ export default function CheckInPage() {
     a.href = url
     const fileTimestamp = now.toLocaleString('ja-JP').replace(/[\/:]/g, '-').replace(/\s/g, '_')
     a.download = `checkin_${fileTimestamp}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // 集計サマリーCSVを出力
+  const downloadSummaryCSV = () => {
+    const now = new Date()
+    const exportedAt = now.toLocaleString('ja-JP')
+
+    const preRegistered = attendees.filter(a => a.source !== 'walkin')
+    const walkins = attendees.filter(a => a.source === 'walkin')
+    const preRegisteredAdults = preRegistered.filter(a => a.type === 'adult')
+    const preRegisteredChildren = preRegistered.filter(a => a.type === 'child')
+    const walkinAdults = walkins.filter(a => a.type === 'adult')
+    const walkinChildren = walkins.filter(a => a.type === 'child')
+
+    const checkedInCount = attendees.filter(a => a.checked_in).length
+    const receptionNowCount = attendees.filter(a => a.is_reception).length
+    const receptionChangedCount = attendees.filter(a => a.reception_updated_at).length
+    const receptionCancelled = attendees.filter(a => a.reception_updated_at && !a.is_reception)
+    const receptionAdded = attendees.filter(a => a.reception_updated_at && a.is_reception)
+
+    const rows: string[][] = [
+      [`出力日時: ${exportedAt}`],
+      [],
+      ['【全体サマリー】'],
+      ['事前登録者数（合計）', String(preRegistered.length)],
+      ['　うち大人', String(preRegisteredAdults.length)],
+      ['　うち子ども', String(preRegisteredChildren.length)],
+      ['当日追加人数（合計）', String(walkins.length)],
+      ['　うち大人', String(walkinAdults.length)],
+      ['　うち子ども', String(walkinChildren.length)],
+      ['当日チェックイン済み人数', String(checkedInCount)],
+      ['現在の懇親会あり人数', String(receptionNowCount)],
+      ['懇親会ステータス変更件数（当日中）', String(receptionChangedCount)],
+      [],
+      ['【当日、懇親会をキャンセルした人】'],
+      ['名前', 'フリガナ', '変更日時'],
+      ...receptionCancelled.map(a => [a.name, a.furigana || '', a.reception_updated_at ? new Date(a.reception_updated_at).toLocaleString('ja-JP') : '']),
+      [],
+      ['【当日、懇親会に追加された人】'],
+      ['名前', 'フリガナ', '変更日時'],
+      ...receptionAdded.map(a => [a.name, a.furigana || '', a.reception_updated_at ? new Date(a.reception_updated_at).toLocaleString('ja-JP') : '']),
+      [],
+      ['【当日の飛び込み追加者 一覧】'],
+      ['名前', 'フリガナ', '種別', '保護者'],
+      ...walkins.map(a => [a.name, a.furigana || '', a.type === 'child' ? '子ども' : '大人', a.guardian_id ? (attendees.find(g => g.id === a.guardian_id)?.name || '') : '']),
+    ]
+
+    const csv = rows.map(row => row.join(',')).join('\n')
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    const fileTimestamp = now.toLocaleString('ja-JP').replace(/[\/:]/g, '-').replace(/\s/g, '_')
+    a.download = `summary_${fileTimestamp}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -480,8 +574,17 @@ export default function CheckInPage() {
                 </p>
               )}
               {attendee.type === 'adult' && (
-                <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${badgeClass}`}>
-                  {badgeLabel}
+                <span
+                  role="button"
+                  onClick={(ev) => handleToggleReception(attendee, ev)}
+                  className={`text-[10px] px-2 py-0.5 rounded-full font-medium active:opacity-70 ${badgeClass}`}
+                >
+                  {togglingReception === attendee.id ? '変更中...' : badgeLabel}
+                </span>
+              )}
+              {attendee.source === 'walkin' && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-gray-200 text-gray-600">
+                  当日追加
                 </span>
               )}
             </div>
@@ -699,9 +802,16 @@ export default function CheckInPage() {
 
       <button
         onClick={downloadCSV}
-        className="w-full bg-gray-800 text-white py-4 rounded-2xl font-semibold text-lg"
+        className="w-full bg-gray-800 text-white py-4 rounded-2xl font-semibold text-lg mb-3"
       >
-        CSVダウンロード
+        CSVダウンロード（全件データ）
+      </button>
+
+      <button
+        onClick={downloadSummaryCSV}
+        className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-semibold text-lg"
+      >
+        集計サマリーCSVをダウンロード
       </button>
     </div>
   )
