@@ -7,6 +7,7 @@ type Event = {
   id: string
   name: string
   event_date: string
+  reception_capacity: number | null
 }
 
 type Attendee = {
@@ -125,6 +126,28 @@ export default function CheckInPage() {
     setLoading(false)
   }
 
+  // 懇親会の定員を設定・変更する
+  const handleSetCapacity = async () => {
+    if (!event) return
+    const current = event.reception_capacity ?? ''
+    const input = prompt('懇親会の定員数を入力してください', String(current))
+    if (input === null) return
+    const num = parseInt(input, 10)
+    if (isNaN(num) || num < 0) {
+      alert('正しい数字を入力してください')
+      return
+    }
+    const { data, error } = await supabase.from('events').update({
+      reception_capacity: num,
+    }).eq('id', event.id).select().single()
+    if (error) {
+      alert('設定に失敗しました: ' + error.message)
+      return
+    }
+    if (data) setEvent(data)
+    await logAction('懇親会定員を設定', event.name, `${num}名`)
+  }
+
   const handleCardTap = async (attendee: Attendee) => {
     if (attendee.checked_in) {
       setConfirmingId(attendee.id)
@@ -169,7 +192,6 @@ export default function CheckInPage() {
     setConfirmingId(null)
   }
 
-  // 懇親会バッジをタップ：確認ダイアログを経て変更、履歴に記録
   const handleToggleReception = async (attendee: Attendee, ev: React.MouseEvent) => {
     ev.stopPropagation()
     if (togglingReception) return
@@ -414,7 +436,6 @@ export default function CheckInPage() {
     URL.revokeObjectURL(url)
   }
 
-  // 集計サマリーCSVを出力
   const downloadSummaryCSV = () => {
     const now = new Date()
     const exportedAt = now.toLocaleString('ja-JP')
@@ -431,6 +452,8 @@ export default function CheckInPage() {
     const receptionChangedCount = attendees.filter(a => a.reception_updated_at).length
     const receptionCancelled = attendees.filter(a => a.reception_updated_at && !a.is_reception)
     const receptionAdded = attendees.filter(a => a.reception_updated_at && a.is_reception)
+    const capacity = event?.reception_capacity ?? null
+    const openSlots = capacity !== null ? capacity - receptionNowCount : null
 
     const rows: string[][] = [
       [`出力日時: ${exportedAt}`],
@@ -443,7 +466,9 @@ export default function CheckInPage() {
       ['　うち大人', String(walkinAdults.length)],
       ['　うち子ども', String(walkinChildren.length)],
       ['当日チェックイン済み人数', String(checkedInCount)],
+      ['懇親会 定員', capacity !== null ? String(capacity) : '未設定'],
       ['現在の懇親会あり人数', String(receptionNowCount)],
+      ['懇親会 空き枠（キャンセル待ちに案内可能な人数）', openSlots !== null ? String(openSlots) : '未設定'],
       ['懇親会ステータス変更件数（当日中）', String(receptionChangedCount)],
       [],
       ['【当日、懇親会をキャンセルした人】'],
@@ -487,6 +512,9 @@ export default function CheckInPage() {
   const adultChecked = adults.filter(a => a.checked_in).length
   const childChecked = children.filter(a => a.checked_in).length
   const idToName = new Map(attendees.map(a => [a.id, a.name]))
+  const receptionNowCount = attendees.filter(a => a.is_reception).length
+  const receptionCapacity = event?.reception_capacity ?? null
+  const receptionOpenSlots = receptionCapacity !== null ? receptionCapacity - receptionNowCount : null
 
   if (!staffNameLoaded) {
     return (
@@ -649,6 +677,30 @@ export default function CheckInPage() {
         <p className="text-gray-400 text-sm mt-1">
           {new Date(event.event_date).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}
         </p>
+
+        {/* 懇親会の定員・空き枠表示 */}
+        <button
+          type="button"
+          onClick={handleSetCapacity}
+          className="w-full mt-4 bg-pink-50 border border-pink-200 rounded-xl px-4 py-3 text-left"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-pink-700">懇親会</span>
+            <span className="text-[10px] text-pink-400">タップして定員を設定</span>
+          </div>
+          {receptionCapacity !== null ? (
+            <div className="mt-1 flex items-baseline gap-2 flex-wrap">
+              <span className="text-2xl font-bold text-pink-600">{receptionNowCount}</span>
+              <span className="text-sm text-gray-500">/ {receptionCapacity} 名 参加予定</span>
+              <span className={`ml-auto text-sm font-semibold ${receptionOpenSlots !== null && receptionOpenSlots > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                空き枠: {receptionOpenSlots}名
+              </span>
+            </div>
+          ) : (
+            <p className="mt-1 text-sm text-gray-400">定員未設定（タップして設定してください）　現在参加予定: {receptionNowCount}名</p>
+          )}
+        </button>
+
         <div className="mt-4 flex gap-6">
           <div className="flex-1">
             <p className="text-xs text-gray-400 mb-1">大人</p>
