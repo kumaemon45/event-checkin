@@ -669,14 +669,8 @@ export default function CheckInPage() {
   return (
     <div className="max-w-lg mx-auto p-4 pb-8 min-h-screen bg-gray-50">
 
-      <div className="bg-white rounded-2xl shadow-sm p-5 mb-4">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold text-gray-800">{event.name}</h1>
-          <span className="text-xs text-gray-400">担当: {staffName}</span>
-        </div>
-        <p className="text-gray-400 text-sm mt-1">
-          {new Date(event.event_date).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })}
-        </p>
+            <div className="bg-white rounded-2xl shadow-sm p-5 mb-4">
+        <h1 className="text-xl font-bold text-gray-800">{event.name}</h1>
 
         {/* 懇親会の定員・空き枠表示 */}
         <button
